@@ -1,5 +1,10 @@
-{-# LANGUAGE  FlexibleContexts  #-}
-module Autom where
+{-# LANGUAGE  FlexibleContexts, TupleSections #-}
+module Autom (
+    denoteAutom,
+    denoteAutom',
+    buildAutom,
+    dumpAutom
+) where
 
 import Events
 import Types
@@ -60,15 +65,15 @@ dumpAutom :: Autom -> String
 dumpAutom (A m) = "digraph G {\n" ++ concatMap (uncurry go) (Map.assocs m) ++ "\n}"
     where
         go n SStop = show n ++ " : SStop" ++ "\n"
-        go n (SPrepareElim x m) = concatMap (\(shp,n') -> show n ++ " -> " ++ show n' ++ "[label=\"prep " ++ show shp ++"\"]\n") m
+        go n (SPrepareElim x m) = concatMap (\(shp,n') -> show n ++ " -> " ++ show n' ++ "[label=\"prep {" ++ show shp ++"} from " ++ pp x ++ "\"]\n") m
         go n (SForwardInput el om m) = concatMap (\(shp,n') -> show n ++ " -> " ++ show n' ++ "[label=\"fwd " ++ show shp ++ " from " ++ pp el ++"\"]\n") m
         go n (SBranch el n1 n2) = (show n ++ " -> " ++ show n1 ++ "[label=\"branch A " ++ pp el ++ "\"]\n") ++ (show n ++ " -> " ++ show n2 ++ "[label=\"branch B" ++ pp el ++ "\"]\n")
         go n (SJump n') = show n ++ " -> " ++ show n' ++ "[label=\"j\"]" ++ "\n"
         go n (SOutput ev n') = show n ++ " -> " ++ show n' ++ "[label=\"output " ++ show ev ++ "\"]\n"
-    
+
 
 buildAutom :: ElimTerm -> (Int,Autom)
-buildAutom e = let (init,states) = fst (runState (go (-1) e) (0,Nothing)) in (init,A states)
+buildAutom e = let (init,states) = fst (runState (go (-1) e) (0,Nothing)) in (init,A $ Map.insert (-1) SStop states)
     where
         freshStateId :: State (Int,Maybe Int) Int
         freshStateId = do
@@ -98,7 +103,7 @@ buildAutom e = let (init,states) = fst (runState (go (-1) e) (0,Nothing)) in (in
         buildFwdTree re (TyCat s t) end = do
             puncForward <- freshStateId
             (sStart,ms) <- buildFwdTree re s puncForward
-            let ms' = fmap (addCatEvA . addCatEvAShape) ms
+            let ms' = fmap addCatEvAShape ms
             (tStart,mt) <- buildFwdTree re t end
             return (sStart, Map.union ms' (Map.insert puncForward (SForwardInput re OId [(EPCatPunc,tStart)]) mt))
         buildFwdTree re (TyPlus s t) end = do
@@ -112,30 +117,31 @@ buildAutom e = let (init,states) = fst (runState (go (-1) e) (0,Nothing)) in (in
             sStarStart <- freshStateId
             puncForward <- freshStateId
             (sStart,ms) <- buildFwdTree re s puncForward
-            let ms' = fmap (addCatEvA . addCatEvAShape) ms
+            let ms' = fmap addCatEvAShape ms
             let jt = [(EPPlusPuncA,end),(EPPlusPuncB,sStart)]
             let jt' = [(EPCatPunc,sStarStart)]
             return (sStarStart, Map.insert sStarStart (SForwardInput re OId jt) (Map.insert puncForward (SForwardInput re OId jt') ms'))
-        
-        {- this function seems to work but i have no idea how i wrote it -}
-        buildPrepTree el@(VarElim {}) end k = k (jumpTo end)
-        buildPrepTree (Proj1Elim el) end k = do
-            (n,m) <- buildPrepTree el end k
-            return (n, fmap addCatEvAShape m)
-        buildPrepTree (Proj2Elim el) end k = do
-            eatpi2 <- freshStateId
-            buildPrepTree el eatpi2 (\doEl -> do
-                (elStart,m) <- doEl
-                let jumpTable = [(EPCatPunc,end),(EPCatEvA EPWild,eatpi2)]
-                k (return (elStart, Map.insert eatpi2 (SPrepareElim (underlyingVar el) jumpTable) m))
-             )
+
+        buildPrepTree' (VarElim {}) end = (0,) <$> jumpTo end
+        buildPrepTree' (Proj1Elim el) end = do
+            (p1s,(n,m)) <- buildPrepTree' el end
+            return (p1s + 1,(n,m))
+        buildPrepTree' (Proj2Elim el) end = do
+            outer <- freshStateId
+            (p1s,(n,m)) <- buildPrepTree' el outer
+            let jumpTable = [(EPCatPunc,end),(EPCatEvA EPWild,outer)]
+            let jumpTable' = map (Data.Bifunctor.first (composeN p1s EPCatEvA)) jumpTable
+            let m' = Map.insert outer (SPrepareElim (underlyingVar el) jumpTable') m
+            return (p1s,(n,m'))
+
+        buildPrepTree el end = snd <$> buildPrepTree' el end
 
 
         go end EEpsR = jumpTo end
         go end (EUse elim ty) = do
             let readyElim = computeReady elim
             (fwdTreeStart,m) <- buildFwdTree readyElim ty end
-            (prepStart,m') <- buildPrepTree elim fwdTreeStart id
+            (prepStart,m') <- buildPrepTree elim fwdTreeStart
             return (prepStart,Map.union m m')
         go end (EIntR k) = do
             n <- freshStateId
@@ -154,13 +160,17 @@ buildAutom e = let (init,states) = fst (runState (go (-1) e) (0,Nothing)) in (in
             puncNode <- freshStateId
             (estart,m) <- go end e
             return (puncNode,Map.insert puncNode (SOutput PlusPuncB estart) m)
-        
+
+        -- TODO is this correct?
+        -- Do we need to insert a preptree before the branch?
+        -- in case el includes a pi2?
         go end (EPlusCase el e1 e2) = do
-            n <- freshStateId
+            branchPoint <- freshStateId
+            (start,m) <- buildPrepTree el branchPoint
             (e1Start,m1) <- go end e1
             (e2Start,m2) <- go end e2
             let rel = computeReady el
-            return (n,Map.insert n (SBranch rel e1Start e2Start) (Map.union m1 m2))
+            return (start,Map.insert branchPoint (SBranch rel e1Start e2Start) (Map.union m (Map.union m1 m2)))
 
 
         go end (EFix e) = do
@@ -174,6 +184,10 @@ buildAutom e = let (init,states) = fst (runState (go (-1) e) (0,Nothing)) in (in
             fixAddr <- getFixStart
             return (recNode, Map.singleton recNode (SJump fixAddr))
 
+composeN :: Int -> (a -> a) -> a -> a
+composeN 0 _ x = x
+composeN n f x = f (composeN (n-1) f x)
+
 underlyingVar :: Elim -> String
 underlyingVar (VarElim x) = x
 underlyingVar (Proj1Elim el) = underlyingVar el
@@ -183,7 +197,7 @@ underlyingVar (Proj2Elim el) = underlyingVar el
 denoteAutom :: StateId -> Autom -> StreamFunc s TaggedEvent -> StreamFunc (s,Int) Event
 denoteAutom n (A m) (SF x0 next_in) = SF (x0,n) go
     where
-        go (x,n) = let action = Map.lookup n m in next x n (fromMaybe (error "") action)
+        go (x,n) = let action = Map.lookup n m in next x n (fromMaybe (error $ "Failed to find action for state: " ++ show n) action)
 
         nextFromVar x' var =
             case next_in x' of
@@ -207,7 +221,7 @@ denoteAutom n (A m) (SF x0 next_in) = SF (x0,n) go
                 Yield ev x' ->
                     let jumpTarget = fromMaybe (error "") (lookupMatch ev jumpTable) in
                     Skip (x',jumpTarget)
-        
+
         next x n (SForwardInput re om jumpTable) =
             case nextFromReadyElim x re of
                 Done -> Done
@@ -227,8 +241,8 @@ denoteAutom n (A m) (SF x0 next_in) = SF (x0,n) go
         next x _ (SJump n') = Skip (x,n')
 
 lookupMatch :: Event -> [(EventPat, StateId)] -> Maybe StateId
-lookupMatch ev [] = Nothing
-lookupmatch ev ((pat,n):pats) = if match ev pat then Just n else lookupMatch ev pats
+lookupMatch _ [] = Nothing
+lookupMatch ev ((pat,n):pats) = if match ev pat then Just n else lookupMatch ev pats
     where
         match _ EPWild = True
         match (IntEv _) EPIntEv = True
@@ -237,3 +251,6 @@ lookupmatch ev ((pat,n):pats) = if match ev pat then Just n else lookupMatch ev 
         match PlusPuncA EPPlusPuncA = True
         match PlusPuncB EPPlusPuncB = True
         match _ _ = False
+
+denoteAutom' :: Int -> Autom -> Stream TaggedEvent -> Stream Event
+denoteAutom' n m (S s) = S (denoteAutom n m s)

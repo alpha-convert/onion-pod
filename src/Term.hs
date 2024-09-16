@@ -25,8 +25,6 @@ data Term where
     G;x:Int;G' |- IntCase x e1 y e2 : s
     -}
 
-    IntCase :: String -> Term -> String -> Term -> Term
-
     {-
     G;x:s;y:t;G' |- e : r
     ----------------------------
@@ -48,6 +46,7 @@ data Term where
     Nil :: Term
     Cons :: Term -> Term -> Term
     StarCase :: String -> Term -> String -> String -> Term -> Term
+    Wait :: String -> Ty -> Term -> Term
     Fix :: Term -> Term
     Rec :: Term
     deriving (Eq,Ord,Show)

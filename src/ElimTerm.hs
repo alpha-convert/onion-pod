@@ -8,6 +8,7 @@ import Stream
 
 {- Are Elims just a focusing thing? -}
 data Elim = VarElim String
+          | HistVarElim String
           | Proj1Elim Elim
           | Proj2Elim Elim
           deriving (Eq,Ord,Show)
@@ -43,16 +44,19 @@ elimDeriv :: Elim -> Event -> Elim
 elimDeriv el ev = go el ev const
     where
         go (VarElim x) ev k = k (VarElim x) (Just ev)
+        go (HistVarElim x) ev k = k (HistVarElim x) (Just ev) -- and i have no idea if this case is right.
         go (Proj1Elim el) ev k = go el ev (\el' ev ->
             case ev of
                 Nothing -> k (Proj1Elim el') Nothing
                 Just (CatEvA ev') -> k (Proj1Elim el') (Just ev')
+                Just ev -> error $ "Unexpected event " ++ show ev ++ " in elimderiv"
          )
         go (Proj2Elim el) ev k = go el ev (\el' ev ->
             case ev of
                 Nothing -> k (Proj2Elim el') Nothing
                 Just (CatEvA _) -> k (Proj2Elim el') Nothing
                 Just CatPunc -> k el' Nothing
+                Just ev -> error $ "Unexpected event " ++ show ev ++ " in elimderiv"
          )
 
 
@@ -65,6 +69,7 @@ data ElimTerm =
     | EInL ElimTerm
     | EPlusCase Elim ElimTerm ElimTerm
     | EFix ElimTerm
+    | EWait String Ty ElimTerm
     | ERec
     deriving (Eq,Ord,Show)
 
@@ -97,8 +102,9 @@ inlineElims e = go mempty e
         go m (StarCase z e1 x xs e2) =
             let c = getElim m z in
             EPlusCase c (go m e1) (go (Map.insert x (Proj1Elim (delPi2 c)) (Map.insert xs (Proj2Elim (delPi2 c)) m)) e2)
+        go m (Wait x s e) = EWait x s (go (Map.insert x (HistVarElim x) m) e)
         go m (Fix e) = EFix (go m e)
-        go m Rec = ERec
+        go _ Rec = ERec
 
 denoteElimTerm :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,ElimTerm) Event
 denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
@@ -109,16 +115,15 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                 Skip x'' -> Skip (x'',VarElim x)
                 Yield (TEV z ev) x'' -> if z == x then Yield ev (x'',VarElim x) else Skip (x'',VarElim x)
 
+        nextFromElim x' (HistVarElim x) = _
+
         nextFromElim x' (Proj1Elim c) =
             case nextFromElim x' c of
                 Done -> Done
                 Skip (x'',c') -> Skip (x'',Proj1Elim c')
-
-
                 Yield (CatEvA ev) (x'',c') -> Yield ev (x'', Proj1Elim c')
-
-
                 Yield {} -> error ""
+
         nextFromElim x' (Proj2Elim c) =
                 case nextFromElim x' c of
                     Done -> Done
@@ -128,8 +133,9 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                     Yield CatPunc (x'',c') -> Skip (x'', c') -- peel off the proj2. this is probably not an ideal way to do this, but oh well. should really be in-place.
 
                     Yield {} -> error ""
+        
 
-        next (x',e@(EUse c s)) =
+        next (x',EUse c s) =
             if isNull s
             then Done
             else case nextFromElim x' c of
@@ -156,6 +162,7 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                 Skip (x',c') -> Skip (x',EPlusCase c' e1 e2)
                 Yield PlusPuncA (x',_) -> Skip (x',e1)
                 Yield PlusPuncB (x',_) -> Skip (x',e2)
+                Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
 
         -- next (x', ENil) = Yield PlusPuncA (x',EEpsR)
         -- next (x', ECons e1 e2) = Yield PlusPuncB (x',ECatR e1 e2)
@@ -163,4 +170,11 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
         next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
         next (x', ERec) = error ""
 
+        next (x',EUse c s) =
+            if isNull s
+            then Done
+            else case nextFromElim x' c of
+                    Done -> Done
+                    Skip (x'',c') -> Skip (x'',EUse c' s)
+                    Yield ev (x'',c') -> Yield ev (x'',EUse c' (deriv s ev))
 denoteElimTerm' a (S sf) = S (denoteElimTerm a sf)

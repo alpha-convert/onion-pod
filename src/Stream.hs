@@ -3,10 +3,19 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RankNTypes #-}
-module Stream where
+{-# LANGUAGE UndecidableInstances #-}
+module Stream (
+    Step(..),
+    Stream(..),
+    StreamFunc(..),
+    genStreamFromList,
+    sFromList
+) where
 
 import Control.Monad.State.Strict
 import Control.Monad
+import Test.QuickCheck (Arbitrary, frequency)
+import Test.QuickCheck.Gen (Gen)
 
 data Step s a where
     Done :: Step s a
@@ -283,3 +292,19 @@ instance Functor Stream where
             (next -> Done) -> Done
             (next -> Skip x) -> Skip x
             (next -> Yield a x) -> Yield (f a) x
+
+intersperseNothings [] = return []
+intersperseNothings (x:xs) = do
+    b <- frequency [(10,return True),(7,return False)]
+    if b then (Just x:) <$> intersperseNothings xs
+    else (Nothing:) <$> intersperseNothings (x:xs)
+
+genStreamFromList :: [a] -> Gen (Stream a)
+genStreamFromList xs = do
+    xms <- intersperseNothings xs
+    return (S (SF xms next))
+        where
+            
+            next [] = Done
+            next (Nothing:xs) = Skip xs
+            next (Just a:xs) = Yield a xs
