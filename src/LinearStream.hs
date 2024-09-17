@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 module LinearStream  where
 
 
@@ -32,10 +33,10 @@ stepStateMap f (Skip x) = Skip (f x)
 stepStateMap f (Yield a x) = Yield a (f x)
 
 data StreamFunc s a where
-    SF :: forall s a. s -> (s %1 -> Step s a) -> StreamFunc s a
+    SF :: forall s a. s %1 -> (s %1 -> Step s a) -> StreamFunc s a
 
 data Stream a where
-    S :: forall a s. StreamFunc s a -> Stream a
+    S :: forall a s. StreamFunc s a %1 -> Stream a
 
 ssink :: Stream a
 ssink = S $ SF () undefined
@@ -60,22 +61,14 @@ toPullArray (S (SF @s @a x0 next)) =
                 Skip x' -> go x' arr
                 Yield a x' -> go x' (Pull.append arr (Pull.singleton a))
 
-fromArray :: LinArray.Array a -> Stream a
-fromArray arr =
-    let (n,arr') = size arr in
-    S $ SF (n, move (0 :: Int), arr') next
+fromArray :: LinArray.Array a %1 -> Stream a
+fromArray arr = 
+    size arr & \case (n,arr) -> S $ SF (n, move 0, arr) next
         where
             next :: (Ur Int, Ur Int, LinArray.Array a) %1 -> Step (Ur Int, Ur Int, LinArray.Array a) a
             next (Ur n, Ur i, arr) = if n == i then arr `lseq` Done else
                                      get i arr &
-                                        \(Ur a,arr') -> Yield a (move n, move (i + 1), arr')
-    -- let (n,arr') = findLength arr in
-    -- S $ SF (move n,move 0,arr') $ next
-    --     where
-    --         next :: (Ur Int, Ur Int,Pull.Array a) %1 -> Step (Ur Int, Ur Int,Pull.Array a) a
-    --         next (Ur n,Ur i,arr') = if n == i then Skip (move n, move i, arr') else
-    --                                 let (a,arr'') = Pull.index arr' i in
-    --                                 Skip (move n, move i, arr'')
+                                        \(Ur a,arr) -> Yield a (move n, move (i + 1), arr)
 
 {-
 ssing :: a -> Stream a
