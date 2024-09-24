@@ -51,3 +51,4 @@ spec = do
     describe "Pull Semantics" $ do
         exactSemSpec "let Noop" (Let "x" (IntR 3) (Var "x" TyInt)) [] [IntEv 3]
         exactSemSpec "let no jumpiness" (Let "x" (IntR 3) (CatR (Var "y" TyInt) (Var "x" TyInt))) [TEV "y" (IntEv 4)] [CatEvA (IntEv 4),CatPunc,IntEv 3]
+        exactSemSpec "let rebind" (Let "x" (Var "z" TyInt) (CatR (Var "y" TyInt) (Var "x" TyInt))) [TEV "y" (IntEv 4), TEV "z" (IntEv 5)] [CatEvA (IntEv 4),CatPunc,IntEv 5]

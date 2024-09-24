@@ -9,7 +9,8 @@ module Stream (
     Stream(..),
     StreamFunc(..),
     genStreamFromList,
-    sFromList
+    sFromList,
+    sToList
 ) where
 
 import Control.Monad.State.Strict
