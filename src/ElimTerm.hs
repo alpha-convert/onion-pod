@@ -46,7 +46,6 @@ elimDeriv :: Elim -> Event -> Elim
 elimDeriv el ev = go el ev const
     where
         go (VarElim x) ev k = k (VarElim x) (Just ev)
-        -- go (HistVarElim x) ev k = k (HistVarElim x) (Just ev) -- and i have no idea if this case is right.
         go (Proj1Elim el) ev k = go el ev (\el' ev ->
             case ev of
                 Nothing -> k (Proj1Elim el') Nothing
