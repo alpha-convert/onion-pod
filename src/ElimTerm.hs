@@ -11,6 +11,7 @@ data Elim = VarElim String
         --   | HistVarElim String
           | Proj1Elim Elim
           | Proj2Elim Elim
+          | LetElim ElimTerm
           deriving (Eq,Ord,Show)
 
 {-
@@ -34,6 +35,7 @@ delPi2 :: Elim -> Elim
 delPi2 (VarElim x) = VarElim x
 delPi2 (Proj1Elim c) = Proj1Elim (delPi2 c)
 delPi2 (Proj2Elim c) = delPi2 c
+delPi2 (LetElim e) = LetElim e
 
 {- if elim is an eliminator with underlying variable x, and ev is an event from the channel x,
 then elimDeriv elim ev is the eliminator updated after the event
@@ -58,6 +60,8 @@ elimDeriv el ev = go el ev const
                 Just CatPunc -> k el' Nothing
                 Just ev -> error $ "Unexpected event " ++ show ev ++ " in elimderiv"
          )
+        -- UHH no idea.
+        go (LetElim e) ev k = k (LetElim e) (Just ev)
 
 
 data ElimTerm =
@@ -105,6 +109,7 @@ inlineElims e = go mempty e
         -- go m (Wait x s e) = EWait x s (go (Map.insert x (HistVarElim x) m) e)
         go m (Fix e) = EFix (go m e)
         go _ Rec = ERec
+        go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
 -- StreamFunc s a = (s,s -> Step s a)
 -- Stream a = exists s. StreamFunc s a
@@ -136,6 +141,12 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                     Yield CatPunc (x'',c') -> Skip (x'', c') -- peel off the proj2. this is probably not an ideal way to do this, but oh well. should really be in-place.
 
                     Yield {} -> error ""
+        
+        nextFromElim x' (LetElim e) =
+            case next (x',e) of
+                Done -> Done
+                Skip (x',e') -> Skip (x', LetElim e')
+                Yield ev (x',e') -> Yield ev (x',LetElim e')
         
 
         next (x',EUse c s) =
@@ -172,14 +183,6 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
 
         next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
         next (x', ERec) = error ""
-
-        next (x',EUse c s) =
-            if isNull s
-            then Done
-            else case nextFromElim x' c of
-                    Done -> Done
-                    Skip (x'',c') -> Skip (x'',EUse c' s)
-                    Yield ev (x'',c') -> Yield ev (x'',EUse c' (deriv s ev))
 
 denoteElimTerm' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 denoteElimTerm' a (S sf) = S (denoteElimTerm a sf)
