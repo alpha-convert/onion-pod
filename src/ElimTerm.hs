@@ -8,12 +8,12 @@ import Stream
 
 {- Are Elims just a focusing thing? -}
 data Elim = VarElim String
-          | HistVarElim String
+        --   | HistVarElim String
           | Proj1Elim Elim
           | Proj2Elim Elim
           deriving (Eq,Ord,Show)
-{-
 
+{-
 Elimnel tying:
 
 -------------------------
@@ -44,7 +44,7 @@ elimDeriv :: Elim -> Event -> Elim
 elimDeriv el ev = go el ev const
     where
         go (VarElim x) ev k = k (VarElim x) (Just ev)
-        go (HistVarElim x) ev k = k (HistVarElim x) (Just ev) -- and i have no idea if this case is right.
+        -- go (HistVarElim x) ev k = k (HistVarElim x) (Just ev) -- and i have no idea if this case is right.
         go (Proj1Elim el) ev k = go el ev (\el' ev ->
             case ev of
                 Nothing -> k (Proj1Elim el') Nothing
@@ -69,7 +69,7 @@ data ElimTerm =
     | EInL ElimTerm
     | EPlusCase Elim ElimTerm ElimTerm
     | EFix ElimTerm
-    | EWait String Ty ElimTerm
+    -- | EWait String Ty ElimTerm
     | ERec
     deriving (Eq,Ord,Show)
 
@@ -102,9 +102,12 @@ inlineElims e = go mempty e
         go m (StarCase z e1 x xs e2) =
             let c = getElim m z in
             EPlusCase c (go m e1) (go (Map.insert x (Proj1Elim (delPi2 c)) (Map.insert xs (Proj2Elim (delPi2 c)) m)) e2)
-        go m (Wait x s e) = EWait x s (go (Map.insert x (HistVarElim x) m) e)
+        -- go m (Wait x s e) = EWait x s (go (Map.insert x (HistVarElim x) m) e)
         go m (Fix e) = EFix (go m e)
         go _ Rec = ERec
+
+-- StreamFunc s a = (s,s -> Step s a)
+-- Stream a = exists s. StreamFunc s a
 
 denoteElimTerm :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,ElimTerm) Event
 denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
@@ -115,7 +118,7 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                 Skip x'' -> Skip (x'',VarElim x)
                 Yield (TEV z ev) x'' -> if z == x then Yield ev (x'',VarElim x) else Skip (x'',VarElim x)
 
-        nextFromElim x' (HistVarElim x) = _
+        -- nextFromElim x' (HistVarElim x) = undefined
 
         nextFromElim x' (Proj1Elim c) =
             case nextFromElim x' c of
@@ -177,4 +180,8 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                     Done -> Done
                     Skip (x'',c') -> Skip (x'',EUse c' s)
                     Yield ev (x'',c') -> Yield ev (x'',EUse c' (deriv s ev))
+
+denoteElimTerm' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 denoteElimTerm' a (S sf) = S (denoteElimTerm a sf)
+
+-- TaggedEvent = (String,Event)

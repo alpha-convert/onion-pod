@@ -46,7 +46,7 @@ data Term where
     Nil :: Term
     Cons :: Term -> Term -> Term
     StarCase :: String -> Term -> String -> String -> Term -> Term
-    Wait :: String -> Ty -> Term -> Term
+    -- Wait :: String -> Ty -> Term -> Term
     Fix :: Term -> Term
     Rec :: Term
     deriving (Eq,Ord,Show)

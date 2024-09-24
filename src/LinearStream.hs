@@ -25,7 +25,7 @@ import Data.Array.Mutable.Linear as LinArray
 data Step s a where
     Done :: Step s a
     Skip :: s %1 -> Step s a
-    Yield :: a -> s %1 -> Step s a
+    Yield :: a %1 -> s %1 -> Step s a
 
 stepStateMap :: (s %1 -> s') -> Step s a %1 -> Step s' a
 stepStateMap f Done = Done
@@ -33,7 +33,7 @@ stepStateMap f (Skip x) = Skip (f x)
 stepStateMap f (Yield a x) = Yield a (f x)
 
 data StreamFunc s a where
-    SF :: forall s a. s %1 -> (s %1 -> Step s a) -> StreamFunc s a
+    SF :: forall s a. s %1 -> !(s %1 -> Step s a) -> StreamFunc s a
 
 data Stream a where
     S :: forall a s. StreamFunc s a %1 -> Stream a
@@ -41,7 +41,7 @@ data Stream a where
 ssink :: Stream a
 ssink = S $ SF () undefined
 
-smap :: (a -> b) -> Stream a -> Stream b
+smap :: (a %1 -> b) -> Stream a -> Stream b
 smap f (S (SF x0 next)) = S $ SF x0 $
     \x -> case next x of
             Done -> Done
@@ -70,30 +70,66 @@ fromArray arr =
                                      get i arr &
                                         \(Ur a,arr) -> Yield a (move n, move (i + 1), arr)
 
-{-
-ssing :: a -> Stream a
-ssing x = S $ SF False (\b -> if not b then Yield x True else Done)
-
-srepeat :: a -> Stream a
-srepeat x = S $ SF () $ const $ Yield x ()
-
 scons :: a -> Stream a -> Stream a
 scons a (S (SF x0 next)) = S $ SF Nothing $
     \case
         Nothing -> Yield a (Just x0)
-        Just (next -> Done) -> Done
-        Just (next -> Skip x) -> Skip (Just x)
-        Just (next -> Yield a x) -> Yield a (Just x)
+        Just x -> case next x of
+                    Done -> Done
+                    Skip x' -> Skip (Just x')
+                    Yield a x' -> Yield a (Just x')
 
-stail :: Stream a -> Stream a
+ssing :: a -> Stream a
+ssing x = S $ SF False (\b -> if not b then Yield x True else Done)
+
+srepeat :: a -> Stream a
+srepeat x = S $ SF () $ Yield x
+
+stail :: Consumable a => Stream a -> Stream a
 stail (S (SF x0 next)) = S $ SF (x0,False) $
+    \(x,b) ->
+        case next x of
+            Done -> b `lseq` Done
+            Skip x' -> Skip (x',b)
+            Yield a x' -> if not b then a `lseq` Skip (x',True) else Yield a (x',True)
+
+ssum :: Stream Int %1 -> Int
+ssum (S (SF x0 next)) = go x0 0
+    where
+        go !x !n = case next x of
+                    Done -> n
+                    Skip x' -> go x' n
+                    Yield n' x' -> go x' (n + n')
+
+sFromList :: [Int] -> Stream Int
+sFromList xs = S (SF xs next)
+    where
+        next :: [Int] %1 -> Step [Int] Int
+        next = \case
+                    [] -> Done
+                    x:ys -> Yield x ys
+
+stutter :: Dupable a => Stream a -> Stream a
+stutter (S (SF x0 next)) =
+    S $ SF (x0,Nothing) $
     \case
-        (next -> Done,_) -> Done
-        (next -> Skip x,b) -> Skip (x,b)
-        (next -> Yield a x,False) -> Skip (x,True)
-        (next -> Yield a x,True) -> Yield a (x,True)
+        (x,Just a) -> Yield a (x,Nothing)
+        (x,Nothing) -> case next x of
+                        Done -> Done
+                        Skip x' -> Skip (x',Nothing)
+                        Yield a x' -> dup2 a & \case (a1,a2) -> Yield a1 (x',Just a2)
+            
+            -- Skip (x,Nothing)
+        
+        -- case next x of
+        --                  Done -> x Done
+        --                  Skip x' -> Skip (x',Nothing)
+        --                  Yield a x' -> Yield a (x',Just a)
 
+test_test :: Int
+test_test = ssum (stutter (sFromList [1,2,3]))
 
+{-
 smapMaybe :: (a -> Maybe b) -> Stream a -> Stream b
 smapMaybe f (S (SF x0 next)) = S $ SF x0 $
     \case
