@@ -110,8 +110,6 @@ inlineElims e = go mempty e
         go _ Rec = ERec
         go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
--- StreamFunc s a = (s,s -> Step s a)
--- Stream a = exists s. StreamFunc s a
 
 denoteElimTerm :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,ElimTerm) Event
 denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
@@ -121,8 +119,6 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                 Done -> Done
                 Skip x'' -> Skip (x'',VarElim x)
                 Yield (TEV z ev) x'' -> if z == x then Yield ev (x'',VarElim x) else Skip (x'',VarElim x)
-
-        -- nextFromElim x' (HistVarElim x) = undefined
 
         nextFromElim x' (Proj1Elim c) =
             case nextFromElim x' c of
@@ -163,8 +159,8 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
         next (x',ECatR e1 e2) =
             case next (x',e1) of
                 Skip (x'',e1') -> Skip (x'',ECatR e1' e2)
-                Done -> Yield CatPunc (x',e2)
                 Yield ev (x'',e1') -> Yield (CatEvA ev) (x'',ECatR e1' e2)
+                Done -> Yield CatPunc (x',e2)
 
         next (x',EInL e) = Yield PlusPuncA (x',e)
         next (x',EInR e) = Yield PlusPuncB (x',e)
@@ -176,9 +172,6 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
                 Yield PlusPuncA (x',_) -> Skip (x',e1)
                 Yield PlusPuncB (x',_) -> Skip (x',e2)
                 Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
-
-        -- next (x', ENil) = Yield PlusPuncA (x',EEpsR)
-        -- next (x', ECons e1 e2) = Yield PlusPuncB (x',ECatR e1 e2)
 
         next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
         next (x', ERec) = error ""
