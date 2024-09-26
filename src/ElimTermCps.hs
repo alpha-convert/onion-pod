@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TupleSections #-}
-module ElimTerm where
+module ElimTermCps where
 
 import Events
 import Types
@@ -123,19 +123,19 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
         s -> Elim -> w -> 
             ((s, Elim) -> w) -> 
                 (Event -> (s, Elim) -> w) -> w
-    nextFromElim x' (VarElim x) done skip yield = 
+    nextFromElim x' (VarElim y) done skip yield = 
         next x' 
             done 
             --- Advance the state.
-            (\x'' -> skip (x'', VarElim x))
-            (\(TEV z ev) x'' -> if z == x 
+            (\x'' -> skip (x'', VarElim y))
+            (\(TEV z ev) x'' -> if z == y 
             {-
                 If the tag matches the variable, yield 
                 the event and a tuple of the updated
                 state + the variable.
             -}
-                                then yield ev (x'', VarElim x) 
-                                else skip (x'', VarElim x))
+                                then yield ev (x'', VarElim y) 
+                                else skip (x'', VarElim y))
     nextFromElim x' (Proj1Elim c) done skip yield = 
         nextFromElim x' c
             done
@@ -157,29 +157,25 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
     --- Haven't discussed this one much.
     nextFromElim x' (LetElim e') done skip yield = 
         next' (x', e') 
-        done
-        (\(x'', e'') -> skip (x'', LetElim e''))
-        (\ev (x'', e'') -> yield ev (x'', LetElim e''))
+            done
+            (\(x'', e'') -> skip (x'', LetElim e''))
+            (\ev (x'', e'') -> yield ev (x'', LetElim e''))
     next' :: forall w. 
         (s, ElimTerm) -> 
             w -> ((s, ElimTerm) -> w) -> 
                 (Event -> (s, ElimTerm) -> w) -> w
-    next' (x', EUse c s') done skip yield
-        | isNull s' = done
+    next' (x', EUse c s) done skip yield
+        | isNull s = done
         | otherwise = 
             nextFromElim x' c 
                 done
-                (\(x'', c') -> skip (x'', EUse c' s')) 
-                (\ev (x'', c') -> yield ev (x'', EUse c' (deriv s' ev)))
-    next' (x', EPlusCase c e1 e2) done skip _ =
-        nextFromElim x' c
-            done
-            (\(x'', c') -> skip (x'', EPlusCase c' e1 e2))
-            (\ev (x'', _) -> case ev of
-                PlusPuncA -> skip (x'', e1)
-                PlusPuncB -> skip (x'', e2)
-                _ -> error "Unexpected event in PlusCase."
-            )
+                (\(x'', c') -> skip (x'', EUse c' s)) 
+                (\ev (x'', c') -> yield ev (x'', EUse c' (deriv s ev)))
+
+    next' (x', EIntR n) _ _ yield = yield (IntEv n) (x', EEpsR)
+
+    next' (_, EEpsR) done _ _ = done
+
     next' (x', ECatR e1 e2) _ skip yield =
         next' (x', e1)
             --- When done, yield punctuation indicating that
@@ -190,12 +186,22 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
             --- Wrap the event in a CatEvA term so we know what part
             --- of the stream it belongs to.
             (\ev (x'', e1') -> yield (CatEvA ev) (x'', ECatR e1' e2))
-    next' (_, EFix _) _ _ _ = error "Not yet implemented."
-    next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
-    next' (_, EEpsR) done _ _ = done
-    next' (x', EIntR n) _ _ yield = yield (IntEv n) (x', EEpsR)
+
     next' (x', EInL e') _ _ yield = yield PlusPuncA (x', e')
     next' (x', EInR e') _ _ yield = yield PlusPuncB (x', e')
+
+    next' (x', EPlusCase c e1 e2) done skip _ =
+        nextFromElim x' c
+            done
+            (\(x'', c') -> skip (x'', EPlusCase c' e1 e2))
+            (\ev (x'', _) -> case ev of
+                PlusPuncA -> skip (x'', e1)
+                PlusPuncB -> skip (x'', e2)
+                _ -> error "Unexpected event in PlusCase."
+            )
+    
+    next' (_, EFix _) _ _ _ = error "Not yet implemented."
+    next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
 
 denoteElimTermCps' :: ElimTerm -> StreamCps TaggedEvent -> StreamCps Event
 denoteElimTermCps' e (S sf) = S (denoteElimTermCps e sf)
