@@ -10,15 +10,7 @@ module StreamCps (
     StreamFuncCps(..),
     sFromList,
     sToList,
-    Step
 ) where
-
-import Data.Maybe (isNothing)
-
-data Step s a where
-    Done :: Step s a
-    Skip :: s -> Step s a
-    Yield :: a -> s -> Step s a
 
 data StreamFuncCps s a = SFCps {
   state :: s, 
@@ -57,7 +49,6 @@ smapMaybeCps (f :: a -> Maybe b) (S (SFCps @s x0 next')) = S (SFCps @s x0 next''
         Nothing -> skip s'
         Just b -> yield b s'
       )
-
 
 sfilter :: (a -> Bool) -> StreamCps a -> StreamCps a
 sfilter f = smapMaybeCps (\x -> if f x then Just x else Nothing)

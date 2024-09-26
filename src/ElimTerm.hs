@@ -150,7 +150,7 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
             else case nextFromElim x' c of
                     Done -> Done
                     Skip (x'',c') -> Skip (x'',EUse c' s)
-                    Yield ev (x'',c') -> Yield ev (x'',EUse c' (deriv s ev))
+                    Yield ev (x'',c') -> Yield ev (x'', EUse c' (deriv s ev))
 
         next (x',EIntR n) = Yield (IntEv n) (x',EEpsR)
 
