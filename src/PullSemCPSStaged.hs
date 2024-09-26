@@ -15,11 +15,25 @@ import Events
 import Types
 import Language.Haskell.TH
 
-denoteElimTermCps :: (Quote m) => ElimTerm -> StreamFunc m s TaggedEvent -> StreamFunc m (s, ElimTerm) Event
-denoteElimTermCps e (SF @m @s x0 next) = SF [|| ($$x0, e) ||] next'
+denoteElimTerm' :: (Quote m) => ElimTerm -> StreamFunc m s TaggedEvent -> StreamFunc m (s, ElimTerm) Event
+denoteElimTerm' e (SF @m @s x0 next) = SF [|| ($$x0, e) ||] next'
   where
+    -- Can we give this the type:
+    -- nextFromElim :: (Quote m) => forall w. Code m s -> Code m Elim -> Code m w ->  (Code m s -> Code m Elim -> Code m w) ->  (Code m Event -> Code m s -> Code m Elim -> Code m w) -> Code m w
     nextFromElim :: (Quote m) => forall w. Code m s -> Code m Elim -> Code m w ->  (Code m (s, Elim) -> Code m w) ->  (Code m Event -> Code m (s, Elim) -> Code m w) -> Code m w
-    nextFromElim = undefined
+    nextFromElim cx ce done skip yield = [||
+        case $$ce of
+            VarElim y -> $$(next cx done
+                              (\cx' -> skip [|| ($$cx', VarElim y) ||])
+                              (\ctev cx' -> [||
+                                    let (TEV z ev) = $$ctev in
+                                    if z == y then $$(yield [|| ev ||] [|| ($$cx',VarElim y) ||]) else $$(skip [|| ($$cx',VarElim y) ||])
+                                ||])
+                            )
+            Proj1Elim c -> undefined
+            Proj2Elim c -> undefined
+            LetElim e -> undefined
+     ||]
     -- nextFromElim x' (VarElim y) done skip yield = 
     --     next x' 
     --         done 
@@ -52,25 +66,30 @@ denoteElimTermCps e (SF @m @s x0 next) = SF [|| ($$x0, e) ||] next'
     --         (\ev (x'', e'') -> yield ev (x'', LetElim e''))
 
     next' :: (Quote m) => forall w. Code m (s, ElimTerm) -> Code m w -> (Code m (s, ElimTerm) -> Code m w) -> (Code m Event -> Code m (s, ElimTerm) -> Code m w) -> Code m w
-    next' = undefined
-    -- next' (x', EUse c s) done skip yield
-    --     | isNull s = done
-    --     | otherwise = 
-    --         nextFromElim x' c 
-    --             done
-    --             (\(x'', c') -> skip (x'', EUse c' s)) 
-    --             (\ev (x'', c') -> yield ev (x'', EUse c' (deriv s ev)))
-
-    -- next' (x', EIntR n) _ _ yield = yield (IntEv n) (x', EEpsR)
-
-    -- next' (_, EEpsR) done _ _ = done
+    next' cx done skip yield = [||
+        let (x,e) = $$cx in
+        case e of
+            EUse c s -> if isNull s
+                        then $$done
+                        else $$(nextFromElim [|| x ||] [|| c ||] done
+                                  (\cx'c' -> [|| let (x',c') = $$cx'c' in $$(skip [|| (x',EUse c' s) ||]) ||])
+                                  (\cev cx'c' -> [|| let ev = $$cev in let (x',c') = $$cx'c' in $$(yield [|| ev ||] [|| (x',EUse c' (deriv s ev)) ||]) ||])
+                                )
+            EIntR n -> $$(yield [|| IntEv n ||] [|| (x,EEpsR) ||])
+            EEpsR -> $$done
+            ECatR e1 e2 -> $$(next' [|| (x,e1) ||]
+                                (yield [|| CatPunc ||] [|| (x,e2) ||])
+                                (\cx'e1' -> skip [|| let (x',e1') = $$cx'e1' in (x', ECatR e1' e2) ||])
+                                (\cev cx'e1' -> yield [|| CatEvA $$cev ||] [|| let (x',e1') = $$cx'e1' in (x',ECatR e1' e2) ||])
+                            )
+            EInL e -> $$(yield [|| PlusPuncA ||] [|| (x,e) ||])
+            EInR e -> $$(yield [|| PlusPuncB ||] [|| (x,e) ||])
+            EPlusCase _ _ _ -> undefined
+     ||]
 
     -- next' (x', ECatR e1 e2) _ skip yield =
     --     next' (x', e1)
-    --         --- When done, yield punctuation indicating that
-    --         --- the first part of the stream has finished.
     --         (yield CatPunc (x', e2))
-    --         --- Step without producing output.
     --         (\(x'', e1') -> skip (x'', ECatR e1' e2))
     --         --- Wrap the event in a CatEvA term so we know what part
     --         --- of the stream it belongs to.
@@ -92,5 +111,5 @@ denoteElimTermCps e (SF @m @s x0 next) = SF [|| ($$x0, e) ||] next'
     -- next' (_, EFix _) _ _ _ = error "Not yet implemented."
     -- next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
 
-denoteElimTermCps' :: (Quote m) => ElimTerm -> Stream m TaggedEvent -> Stream m Event
-denoteElimTermCps' e (S sf) = S (denoteElimTermCps e sf)
+denoteElimTerm :: (Quote m) => ElimTerm -> Stream m TaggedEvent -> Stream m Event
+denoteElimTerm e (S sf) = S (denoteElimTerm' e sf)

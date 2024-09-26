@@ -54,7 +54,7 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
             case next (x',e1) of
                 Skip (x'',e1') -> Skip (x'',ECatR e1' e2)
                 Yield ev (x'',e1') -> Yield (CatEvA ev) (x'',ECatR e1' e2)
-                Done -> Yield CatPunc (x',e2)
+                Done -> Yield CatPunc (x',e2) 
 
         next (x',EInL e) = Yield PlusPuncA (x',e)
         next (x',EInR e) = Yield PlusPuncB (x',e)
