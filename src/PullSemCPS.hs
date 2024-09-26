@@ -12,7 +12,7 @@ import StreamCPS
 import Events
 import Types
 
-denoteElimTermCps :: ElimTerm -> StreamFuncCps s TaggedEvent -> StreamFuncCps (s, ElimTerm) Event
+denoteElimTermCps :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s, ElimTerm) Event
 denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
   where
     nextFromElim :: forall w. 
@@ -99,5 +99,5 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
     next' (_, EFix _) _ _ _ = error "Not yet implemented."
     next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
 
-denoteElimTermCps' :: ElimTerm -> StreamCps TaggedEvent -> StreamCps Event
+denoteElimTermCps' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 denoteElimTermCps' e (S sf) = S (denoteElimTermCps e sf)
