@@ -1,18 +1,20 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveLift #-}
 module ElimTerm where
 
 import Events
 import Types
 import Term
 import qualified Data.Map as Map
-import Stream
+import Language.Haskell.TH.Syntax
 
 {- Are Elims just a focusing thing? -}
-data Elim = VarElim String
-        --   | HistVarElim String
-          | Proj1Elim Elim
-          | Proj2Elim Elim
-          | LetElim ElimTerm
-          deriving (Eq,Ord,Show)
+data Elim where
+  VarElim :: String -> Elim
+  Proj1Elim :: Elim -> Elim
+  Proj2Elim :: Elim -> Elim
+  LetElim :: ElimTerm -> Elim
+  deriving (Eq, Ord, Show, Lift)
 
 {-
 Elimnel tying:
@@ -63,18 +65,17 @@ elimDeriv el ev = go el ev const
         go (LetElim e) ev k = k (LetElim e) (Just ev)
 
 
-data ElimTerm =
-      EEpsR
-    | EUse Elim Ty
-    | EIntR Int
-    | ECatR ElimTerm ElimTerm
-    | EInR ElimTerm
-    | EInL ElimTerm
-    | EPlusCase Elim ElimTerm ElimTerm
-    | EFix ElimTerm
-    -- | EWait String Ty ElimTerm
-    | ERec
-    deriving (Eq,Ord,Show)
+data ElimTerm where
+  EEpsR :: ElimTerm
+  EUse :: Elim -> Ty -> ElimTerm
+  EIntR :: Int -> ElimTerm
+  ECatR :: ElimTerm -> ElimTerm -> ElimTerm
+  EInR :: ElimTerm -> ElimTerm
+  EInL :: ElimTerm -> ElimTerm
+  EPlusCase :: Elim -> ElimTerm -> ElimTerm -> ElimTerm
+  EFix :: ElimTerm -> ElimTerm
+  ERec :: ElimTerm
+  deriving (Eq, Ord, Show, Lift)
 
 fixSubst :: ElimTerm -> ElimTerm -> ElimTerm
 fixSubst = undefined
