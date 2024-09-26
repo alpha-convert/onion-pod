@@ -4,7 +4,6 @@ import Types ( Ty(..) )
 import Term
 import Test.QuickCheck (Property, forAll, (===))
 import ElimTerm
-import Autom (buildAutom, denoteAutom, denoteAutom')
 import Events
 import Stream
 import Data.Foldable (toList)
