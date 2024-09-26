@@ -12,6 +12,7 @@ import Types
 import Term
 import qualified Data.Map as Map
 import StreamCps
+import Data.IntMap (partition)
 
 
 {- Are Elims just a focusing thing? -}
@@ -125,8 +126,14 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
     nextFromElim x' (VarElim x) done skip yield = 
         next x' 
             done 
+            --- Advance the state.
             (\x'' -> skip (x'', VarElim x))
             (\(TEV z ev) x'' -> if z == x 
+            {-
+                If the tag matches the variable, yield 
+                the event and a tuple of the updated
+                state + the variable.
+            -}
                                 then yield ev (x'', VarElim x) 
                                 else skip (x'', VarElim x))
     nextFromElim x' (Proj1Elim c) done skip yield = 
@@ -137,6 +144,7 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
                 CatEvA ev' -> yield ev' (x'', Proj1Elim c')
                 _ -> error "Unexpected event in Proj1Elim."
             )
+    --- A little confused about this case.
     nextFromElim x' (Proj2Elim c) done skip _ = 
         nextFromElim x' c
             done
@@ -146,6 +154,7 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
                 CatPunc -> skip (x'', c')
                 _ -> error "Unexpected event in Proj2Elim."
             )
+    --- Haven't discussed this one much.
     nextFromElim x' (LetElim e') done skip yield = 
         next' (x', e') 
         done
@@ -159,7 +168,7 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
         | isNull s' = done
         | otherwise = 
             nextFromElim x' c 
-                done 
+                done
                 (\(x'', c') -> skip (x'', EUse c' s')) 
                 (\ev (x'', c') -> yield ev (x'', EUse c' (deriv s' ev)))
     next' (x', EPlusCase c e1 e2) done skip _ =
@@ -173,8 +182,13 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
             )
     next' (x', ECatR e1 e2) _ skip yield =
         next' (x', e1)
+            --- When done, yield punctuation indicating that
+            --- the first part of the stream has finished.
             (yield CatPunc (x', e2))
+            --- Step without producing output.
             (\(x'', e1') -> skip (x'', ECatR e1' e2))
+            --- Wrap the event in a CatEvA term so we know what part
+            --- of the stream it belongs to.
             (\ev (x'', e1') -> yield (CatEvA ev) (x'', ECatR e1' e2))
     next' (_, EFix _) _ _ _ = error "Not yet implemented."
     next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
