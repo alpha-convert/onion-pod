@@ -18,6 +18,10 @@ module StreamCPSStaged (
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 
+{-
+data StreamFunc m s a = SF (Code m s) (Code m s -> Code m (Step s a))
+-}
+
 data StreamFunc m s a = SF (Code m s) (forall w. Code m s -> Code m w -> (Code m s -> Code m w) -> (Code m a -> Code m s -> Code m w) -> Code m w)
 
 data Stream m a where

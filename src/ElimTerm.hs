@@ -111,5 +111,10 @@ inlineElims e = go mempty e
         go _ Rec = ERec
         go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
-
--- TaggedEvent = (String,Event)
+data RunState =
+      SUnit
+    | SBool Bool
+    | SInL RunState
+    | SInR RunState
+    | SPair RunState RunState
+    | STy Ty

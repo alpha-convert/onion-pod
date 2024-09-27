@@ -7,8 +7,11 @@ import Stream
 import Events
 import Types
 
-denoteElimTerm :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,ElimTerm) Event
-denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
+{-
+Definitional interpreter. It just runs the interpreter for a step!
+-}
+definitional :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,ElimTerm) Event
+definitional e (SF x0 next_in) = SF (x0,e) next
     where
         nextFromElim x' (VarElim x) =
             case next_in x' of
@@ -72,32 +75,54 @@ denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
         next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
         next (x', ERec) = error ""
 
-denoteElimTerm' :: ElimTerm -> Stream TaggedEvent -> Stream Event
-denoteElimTerm' a (S sf) = S (denoteElimTerm a sf)
+definitional' :: ElimTerm -> Stream TaggedEvent -> Stream Event
+definitional' a (S sf) = S (definitional a sf)
 
 
+semElim :: Elim -> StreamFunc s TaggedEvent -> StreamFunc (s,RunState) Event
+semElim (VarElim y) (SF i0 next) = SF (i0,SUnit) $
+    \(i,_) -> case next i of
+                    Done -> Done
+                    Skip i' -> Skip (i',SUnit)
+                    Yield (TEV z ev) i' -> if z == y then Yield ev (i',SUnit) else Skip (i',SUnit)
 
-sem2 :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,RunState) Event
-sem2 (EUse (VarElim y) s) (SF i0 next) = SF (i0,STy s) $ \(i,STy s) ->
-    if isNull s then Done
-    else case next i of
+semElim (Proj1Elim c) s =
+    let (SF (i0,x0) nextC) = semElim c s in
+    SF (i0,x0) $ \(i,x) -> case nextC (i,x) of
+                            Done -> Done
+                            Skip (i',x') -> Skip (i',x')
+                            Yield (CatEvA ev) (i',x') -> Yield ev (i',x')
+                            Yield _ _ -> error ""
+
+semElim (Proj2Elim c) s =
+    let (SF (i0,x0) nextC) = semElim c s in
+    SF (i0,SInL x0) $ \case
+                        (i,SInL x) -> case nextC (i,x) of
+                                        Done -> Done
+                                        Skip (i',x') -> Skip (i',SInL x')
+                                        Yield (CatEvA _) (i',x') -> Skip (i',SInL x')
+                                        Yield CatPunc (i',x') -> Skip (i',SInR x') --switch states
+                        (i,SInR x) -> nextC (i,x)
+
+semElim (LetElim e) s = semElimTerm e s
+
+semElimTerm :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,RunState) Event
+semElimTerm (EUse c t) s =
+    let (SF (i0,x0) nextElim) = semElim c s in
+    SF (i0,SPair x0 (STy t)) $ \(i,SPair x (STy t)) ->
+    if isNull t then Done
+    else case nextElim (i,x) of
             -- TODO: We might need to distinguish an ``input done'' vs ``output done'' branch. The output done will carry the input state.
             -- Maybe we can also break the step function apart into:
             -- Step s s' a
             Done -> Done
-            Skip i' -> Skip (i',STy s)
-            Yield (TEV x ev) i' -> if x == y then Yield ev (i', STy (deriv s ev)) else Skip (i',STy s)
-            -- if isNull s
-            -- then Done
-            -- else case nextFromElim x' c of
-                    -- Done -> Done
-                    -- Skip (x'',c') -> Skip (x'',EUse c' s)
-                    -- Yield ev (x'',c') -> Yield ev (x'', EUse c' (deriv s ev))
-sem2 EEpsR (SF x0 _) = SF (x0,SUnit) (const Done)
-sem2 (EIntR n) (SF x0 _) = SF (x0,SBool False) (\(x,SBool b) -> if b then Done else Yield (IntEv n) (x,SBool True))
-sem2 (ECatR e1 e2) s@(SF i0 _) =
-    let (SF (_,x0) next) = sem2 e1 s in
-    let (SF (_,y0) next') = sem2 e2 s in
+            Skip (i',x') -> Skip (i',SPair x' (STy t))
+            Yield ev (i',x') -> Yield ev (i', SPair x' (STy (deriv t ev)))
+semElimTerm EEpsR (SF x0 _) = SF (x0,SUnit) (const Done)
+semElimTerm (EIntR n) (SF x0 _) = SF (x0,SBool False) (\(x,SBool b) -> if b then Done else Yield (IntEv n) (x,SBool True))
+semElimTerm (ECatR e1 e2) s@(SF i0 _) =
+    let (SF (_,x0) next) = semElimTerm e1 s in
+    let (SF (_,y0) next') = semElimTerm e2 s in
     SF (i0,SInL x0) $ \case
                         (i,SInL x) -> case next (i,x) of
                                         Yield ev (i',x') -> Yield (CatEvA ev) (i',SInL x')
@@ -107,4 +132,24 @@ sem2 (ECatR e1 e2) s@(SF i0 _) =
                                         Done -> Done
                                         Skip (i',y') -> Skip (i',SInR y')
                                         Yield ev (i',y') -> Yield ev (i',SInR y')
-sem2 _ _ = undefined
+semElimTerm (EPlusCase c e1 e2) s =
+    let (SF (i0,cx0) nextSem) = semElim c s in
+    let (SF (_,x0) next1) = semElimTerm e1 s in
+    let (SF (_,y0) next2) = semElimTerm e2 s in
+    SF (i0,SInL cx0) $ \case
+                            (i,SInL cx) -> case nextSem (i,cx) of
+                                             Done -> Done
+                                             Skip (i',cx') -> Skip (i',SInL cx')
+                                             Yield PlusPuncA (i',_) -> Skip (i',SInR (SInL x0))
+                                             Yield PlusPuncB (i',_) -> Skip (i',SInR (SInR y0))
+                            -- THIS IS A MONOTNE TRANITION -- we're never gonna go back to SInL. We should figur eout how to eliminate this case after it's taken.
+                            (i,SInR (SInL x)) -> case next1 (i,x) of
+                                                    Done -> Done
+                                                    Skip (i',x') -> Skip (i',SInR (SInL x'))
+                                                    Yield ev (i',x') -> Yield ev (i',SInR (SInL x'))
+                            (i,SInR (SInR y)) -> case next2 (i,y) of
+                                                    Done -> Done
+                                                    Skip (i',y') -> Skip (i',SInR (SInR y'))
+                                                    Yield ev (i',y') -> Yield ev (i',SInR (SInR y'))
+
+semElimTerm _ _ = undefined
