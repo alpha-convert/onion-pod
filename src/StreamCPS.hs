@@ -5,43 +5,43 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module StreamCps (
-    StreamCps(..),
-    StreamFuncCps(..),
+module StreamCPS (
+    Stream(..),
+    StreamFunc(..),
     sFromList,
     sToList,
 ) where
 
-data StreamFuncCps s a = SFCps {
+data StreamFunc s a = SF {
   state :: s, 
   next :: forall w. s -> w -> (s -> w) -> (a -> s -> w) -> w
   }
 
-data StreamCps a where
-    S :: forall s a. StreamFuncCps s a -> StreamCps a
+data Stream a where
+    S :: forall s a. StreamFunc s a -> Stream a
 
-sFromList :: [a] -> StreamCps a
-sFromList xs = S ( SFCps { state = xs, next = next' } )
+sFromList :: [a] -> Stream a
+sFromList xs = S ( SF { state = xs, next = next' } )
   where
     next' [] done _ _ = done                 
     next' (y:ys) _ _ yield = yield y ys
 
-instance Foldable StreamCps where
-  foldr f y0 (S SFCps { .. }) = go state
+instance Foldable Stream where
+  foldr f y0 (S SF { .. }) = go state
     where
       go st = next st y0 go (\a s' -> f a (go s'))
 
-sToList :: StreamCps a -> [a]
+sToList :: Stream a -> [a]
 sToList = foldr (:) []
 
-smapCps :: (a -> b) -> StreamCps a -> StreamCps b
-smapCps (f :: a -> b) (S (SFCps @s x0 next')) = S (SFCps @s x0 next'')
+smapCps :: (a -> b) -> Stream a -> Stream b
+smapCps (f :: a -> b) (S (SF @s x0 next')) = S (SF @s x0 next'')
   where
     next'' :: forall w. s -> w -> (s -> w) -> (b -> s -> w) -> w
     next'' st done skip yield = next' st done skip (\a s' -> yield (f a) s')
 
-smapMaybeCps :: (a -> Maybe b) -> StreamCps a -> StreamCps b
-smapMaybeCps (f :: a -> Maybe b) (S (SFCps @s x0 next')) = S (SFCps @s x0 next'')
+smapMaybeCps :: (a -> Maybe b) -> Stream a -> Stream b
+smapMaybeCps (f :: a -> Maybe b) (S (SF @s x0 next')) = S (SF @s x0 next'')
   where
     next'' :: forall w. s -> w -> (s -> w) -> (b -> s -> w) -> w
     next'' st done skip yield = next' st done skip (\a s' ->
@@ -50,5 +50,5 @@ smapMaybeCps (f :: a -> Maybe b) (S (SFCps @s x0 next')) = S (SFCps @s x0 next''
         Just b -> yield b s'
       )
 
-sfilter :: (a -> Bool) -> StreamCps a -> StreamCps a
+sfilter :: (a -> Bool) -> Stream a -> Stream a
 sfilter f = smapMaybeCps (\x -> if f x then Just x else Nothing)
