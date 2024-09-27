@@ -77,11 +77,11 @@ denoteElimTerm' e (SF @m @s x0 next) = SF [|| ($$x0, e) ||] next'
                                 )
             EIntR n -> $$(yield [|| IntEv n ||] [|| (x,EEpsR) ||])
             EEpsR -> $$done
-            ECatR e1 e2 -> $$(next' [|| (x,e1) ||]
-                                (yield [|| CatPunc ||] [|| (x,e2) ||])
-                                (\cx'e1' -> skip [|| let (x',e1') = $$cx'e1' in (x', ECatR e1' e2) ||])
-                                (\cev cx'e1' -> yield [|| CatEvA $$cev ||] [|| let (x',e1') = $$cx'e1' in (x',ECatR e1' e2) ||])
-                            )
+            -- ECatR e1 e2 -> $$(next' [|| (x,e1) ||]
+                                -- (yield [|| CatPunc ||] [|| (x,e2) ||])
+                                -- (\cx'e1' -> skip [|| let (x',e1') = $$cx'e1' in (x', ECatR e1' e2) ||])
+                                -- (\cev cx'e1' -> yield [|| CatEvA $$cev ||] [|| let (x',e1') = $$cx'e1' in (x',ECatR e1' e2) ||])
+                            -- )
             EInL e -> $$(yield [|| PlusPuncA ||] [|| (x,e) ||])
             EInR e -> $$(yield [|| PlusPuncB ||] [|| (x,e) ||])
             EPlusCase _ _ _ -> undefined
