@@ -14,7 +14,6 @@ data Elim where
   Proj1Elim :: Elim -> Elim
   Proj2Elim :: Elim -> Elim
   LetElim :: ElimTerm -> Elim
-  deriving (Eq, Ord, Show, Lift)
 
 {-
 Elimnel tying:
@@ -52,14 +51,14 @@ elimDeriv el ev = go el ev const
             case ev of
                 Nothing -> k (Proj1Elim el') Nothing
                 Just (CatEvA ev') -> k (Proj1Elim el') (Just ev')
-                Just ev -> error $ "Unexpected event " ++ show ev ++ " in elimderiv"
+                Just ev -> error $ "Unexpected event in elimderiv"
          )
         go (Proj2Elim el) ev k = go el ev (\el' ev ->
             case ev of
                 Nothing -> k (Proj2Elim el') Nothing
                 Just (CatEvA _) -> k (Proj2Elim el') Nothing
                 Just CatPunc -> k el' Nothing
-                Just ev -> error $ "Unexpected event " ++ show ev ++ " in elimderiv"
+                Just ev -> error $ "Unexpected event in elimderiv"
          )
         -- UHH no idea.
         go (LetElim e) ev k = k (LetElim e) (Just ev)
@@ -75,7 +74,6 @@ data ElimTerm where
   EPlusCase :: Elim -> ElimTerm -> ElimTerm -> ElimTerm
   EFix :: ElimTerm -> ElimTerm
   ERec :: ElimTerm
-  deriving (Eq, Ord, Show, Lift)
 
 fixSubst :: ElimTerm -> ElimTerm -> ElimTerm
 fixSubst = undefined

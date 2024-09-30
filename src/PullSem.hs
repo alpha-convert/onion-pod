@@ -70,7 +70,7 @@ definitional e (SF x0 next_in) = SF (x0,e) next
                 Skip (x',c') -> Skip (x',EPlusCase c' e1 e2)
                 Yield PlusPuncA (x',_) -> Skip (x',e1)
                 Yield PlusPuncB (x',_) -> Skip (x',e2)
-                Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
+                Yield ev _ -> error $ "Unexpected event from pluscase"
 
         next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
         next (x', ERec) = error ""

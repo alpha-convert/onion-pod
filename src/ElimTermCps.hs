@@ -11,7 +11,7 @@ import Events
 import Types
 import Term
 import qualified Data.Map as Map
-import StreamCps
+import StreamC
 import Data.IntMap (partition)
 
 
@@ -116,8 +116,8 @@ inlineElims e = go mempty e
         go _ Rec = ERec
         go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
-denoteElimTermCps :: ElimTerm -> StreamFuncCps s TaggedEvent -> StreamFuncCps (s, ElimTerm) Event
-denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
+denoteElimTermCps :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s, ElimTerm) Event
+denoteElimTermCps e (SF @s x0 next) = SF (x0, e) next'
   where
     nextFromElim :: forall w. 
         s -> Elim -> w -> 
@@ -203,5 +203,5 @@ denoteElimTermCps e (SFCps @s x0 next) = SFCps (x0, e) next'
     next' (_, EFix _) _ _ _ = error "Not yet implemented."
     next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
 
-denoteElimTermCps' :: ElimTerm -> StreamCps TaggedEvent -> StreamCps Event
+denoteElimTermCps' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 denoteElimTermCps' e (S sf) = S (denoteElimTermCps e sf)

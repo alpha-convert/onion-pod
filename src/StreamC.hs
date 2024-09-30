@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module StreamCPS (
+module StreamC (
     Stream(..),
     StreamFunc(..),
     sFromList,

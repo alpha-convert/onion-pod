@@ -9,7 +9,7 @@
 module PullSemCPS where
 
 import ElimTerm
-import StreamCPS
+import StreamC
 import Events
 import Types
 
