@@ -56,10 +56,10 @@ semElimTerm (EUse c t) s = undefined
 semElimTerm EEpsR (IS iinit _) = S iinit $ SF ($ ()) $ \_ _ done _ _ -> done
 
 semElimTerm (EIntR n) (IS iinit _) = S iinit $ SF 
-    (\k -> [|| do {intSent <- newSTRef False; $$(k [||intSent||])} ||]) --Another piece of state that should be control. Basically everything should be except for actual state!
+    (\k -> [|| do {intSent_ref <- newSTRef False; $$(k [||intSent_ref||])} ||]) --Another piece of state that should be control. Basically everything should be except for actual state!
     (\_ cref done _ yield -> [|| do
-        b <- readSTRef $$cref;
-        if b then $$done else writeSTRef $$cref True >> $$(yield [||(IntEv n)||])
+        intSent <- readSTRef $$cref;
+        if not intSent then writeSTRef $$cref True >> $$(yield [||(IntEv n)||]) else $$done
     ||])
 
 semElimTerm (ECatR e1 e2) s =
@@ -74,28 +74,6 @@ semElimTerm (ECatR e1 e2) s =
             else
                 $$(next2 i y done skip yield)
         ||]
-
-{-
-semElimTerm (ECatR e1 e2) s@(SF _ _) =
-    let (SF cix0 next) = semElimTerm e1 s in
-    let (SF ciy0 next') = semElimTerm e2 s in
-    SF [||let (i0,x0) = $$cix0 in (i0,SInL x0)||] $
-        \cist done skip yield -> [||
-            let (i,st) = $$cist in
-            let (_,y0) = $$ciy0 in
-            case st of
-                SInL x -> $$(next [||(i,x)||]
-                                    (yield [||CatPunc||] [||(i,SInR y0)||])
-                                    (\cix' -> skip [||let (i',x') = $$cix' in (i',SInL x')||])
-                                    (\cev cix' -> yield [||CatEvA $$cev||] [||let (i',x') = $$cix' in (i',SInL x')||])
-                            )
-                SInR y -> $$(next' [||(i,y)||]
-                                    done
-                                    (\ciy' -> skip [||let (i',y') = $$ciy' in (i',SInR y')||])
-                                    (\cev ciy' -> yield cev [||let (i',y') = $$ciy' in (i',SInR y')||]))
-        ||]
-
--}
 
 {-
 HMM. as currently implemented this'll allocate for both branches at the beginning. This is bad, we want

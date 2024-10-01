@@ -157,8 +157,11 @@ sFromList xs = IS (\k -> [|| do {inp_ref <- newSTRef xs; $$(k [|| inp_ref ||])} 
 
 
 
--- ssum :: (Quote m) => Stream m t Int -> Code m (ST t Int)
--- ssum = sfold (\x y -> [|| $$x + $$y ||]) [|| 0 ||]
+ssum :: (Quote m) => Stream m t i Int -> Code m (ST t Int)
+ssum = sfold (\x y -> [|| $$x + $$y ||]) [|| 0 ||]
+
+sToList :: (Quote m) => Stream m t i a -> Code m (ST t [a])
+sToList = sfold (\x y -> [|| $$x ++ [$$y] ||]) [|| [] ||]
 
 -- sCollect :: (Quote m, Alternative f) => Stream m t a -> Code m (ST t (f a))
 -- sCollect = sfold (\cxs cx -> [|| $$cxs <|> pure $$cx ||]) [|| empty ||]
