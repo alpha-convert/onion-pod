@@ -52,23 +52,7 @@ semElim (LetElim e) s = semElimTerm e s
 
 semElimTerm :: (Quote m) => ElimTerm -> IStream m t i TaggedEvent -> Stream m t i Event
 semElimTerm (EUse c t) s = undefined
-{-
-semElimTerm (EUse c t) s =
-    let (SF cix0 nextElim) = semElim c s in
-    SF [||let (i0,x0) = $$cix0 in (i0,SPair x0 (STy t))||] $ \cixt done skip yield ->
-    [||
-        let (i,SPair x (STy t)) = $$cixt in
-        if isNull t then $$done
-        else $$(nextElim [|| (i,x) ||] done
-                (\cix' -> [|| let (i',x') = $$cix' in $$(skip [|| (i',SPair x' (STy t)) ||]) ||])
-                (\cev cix' -> [||
-                    let ev = $$cev in
-                    let (i',x') = $$cix' in
-                    $$(yield [|| ev ||] [|| (i',SPair x' (STy (deriv t ev))) ||])
-                 ||])
-               )
-    ||]
--}
+
 semElimTerm EEpsR (IS iinit _) = S iinit $ SF ($ ()) $ \_ _ done _ _ -> done
 
 semElimTerm (EIntR n) (IS iinit _) = S iinit $ SF 
@@ -78,7 +62,18 @@ semElimTerm (EIntR n) (IS iinit _) = S iinit $ SF
         if b then $$done else writeSTRef $$cref True >> $$(yield [||(IntEv n)||])
     ||])
 
-semElimTerm (ECatR e1 e2) s = undefined
+semElimTerm (ECatR e1 e2) s =
+    semElimTerm e1 s & \(S iinit (SF xinit next1)) ->
+    semElimTerm e2 s & \(S _ (SF yinit next2)) ->
+    -- Once again, control should be control! Not state that you branch on.
+    S iinit $ SF (\k -> xinit (\x -> yinit (\y -> [|| do { finished_e1 <- newSTRef False; $$(k (x,y,[||finished_e1||]))} ||]))) $
+        \i (x,y,crfinished) done skip yield -> [|| do
+            e1_done <- readSTRef $$crfinished
+            if not e1_done then
+                $$(next1 i x [|| writeSTRef $$crfinished True >> $$(yield [|| CatPunc ||]) ||] skip (\cev -> yield [|| CatEvA $$cev||]))
+            else
+                $$(next2 i y done skip yield)
+        ||]
 
 {-
 semElimTerm (ECatR e1 e2) s@(SF _ _) =
@@ -103,6 +98,9 @@ semElimTerm (ECatR e1 e2) s@(SF _ _) =
 -}
 
 {-
+HMM. as currently implemented this'll allocate for both branches at the beginning. This is bad, we want
+to allocate locally.
+
 semElimTerm (EPlusCase c e1 e2) s =
     let (SF cicx0 nextSem) = semElim c s in
     let (SF cix0 next1) = semElimTerm e1 s in
