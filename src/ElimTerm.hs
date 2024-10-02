@@ -14,6 +14,7 @@ data Elim where
   Proj1Elim :: Elim -> Elim
   Proj2Elim :: Elim -> Elim
   LetElim :: ElimTerm -> Elim
+  deriving (Lift)
 
 {-
 Elimnel tying:
@@ -74,6 +75,7 @@ data ElimTerm where
   EPlusCase :: Elim -> ElimTerm -> ElimTerm -> ElimTerm
   EFix :: ElimTerm -> ElimTerm
   ERec :: ElimTerm
+  deriving (Lift)
 
 fixSubst :: ElimTerm -> ElimTerm -> ElimTerm
 fixSubst = undefined

@@ -16,7 +16,7 @@ import Types
 import Language.Haskell.TH
 
 denoteElimTerm' :: (Quote m) => ElimTerm -> StreamFunc m s TaggedEvent -> StreamFunc m (s, ElimTerm) Event
-denoteElimTerm' e (SF @m @s x0 next) = SF [|| ($$x0, e) ||] next'
+denoteElimTerm' e (SF @m @s x0 next) = SF [|| ($$x0, e :: ElimTerm) ||] next'
   where
     -- Can we give this the type:
     -- nextFromElim :: (Quote m) => forall w. Code m s -> Code m Elim -> Code m w ->  (Code m s -> Code m Elim -> Code m w) ->  (Code m Event -> Code m s -> Code m Elim -> Code m w) -> Code m w
