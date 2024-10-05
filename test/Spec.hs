@@ -1,2 +1,5 @@
-{-# OPTIONS_GHC -F -pgmF hspec-discover #-}
+import Test.Hspec
+import MechanicalEquivSpec (spec)
 
+main :: IO ()
+main = hspec spec

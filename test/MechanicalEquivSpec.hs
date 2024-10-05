@@ -1,15 +1,15 @@
-module MechanicalEquivSpec where
+module MechanicalEquivSpec (spec) where
 
 import Types
 import Term
 import Test.QuickCheck
 import ElimTerm
 import Events
-import Stream
-import StreamC
+import Stream as S1
+import StreamC as S2
 import StreamCPSStaged
-import PullSem
-import PullSemCPS
+import PullSem as P1
+import PullSemCPS as P2
 import PullSemCPSStaged
 import PullSemCPSStagedImperative
 import Data.Foldable (toList)
@@ -114,7 +114,6 @@ genTm ctx ty = sized (go ctx ty)
               InR <$> go ctx' ty2 (n `div` 2)
             -- TODO: PlusCase
             ]
-    
     go _ _ _ = undefined
 
 -- Worry about this later.
@@ -122,4 +121,43 @@ genName :: Gen String
 genName = elements ["x", "y", "z", "w"]
 
 main :: IO ()
-main = sample genCtx
+main = do
+  -- Generate and print a sample context
+  putStrLn "Generated Contexts:"
+  ctx <- generate genCtx
+  print ctx
+  
+  -- Generate and print a sample type
+  putStrLn "Generated Types:"
+  ty <- generate genTy
+  print ty
+  
+  -- Generate and print a sample term
+  putStrLn "Generated Terms:"
+  sample (genTm ctx ty)
+
+{-
+equivSpec :: String -> Spec
+equivSpec s = it s $ do
+  ctx <- generate genCtx
+  ty  <- generate genTy
+  
+  tm <- generate (genTm ctx ty)
+  
+  let elimTm = inlineElims tm
+  let tevs = genTaggedEventsForContext ctx
+  let (S1.S (S1.SF x0 p)) = S1.sFromList tevs
+  
+  S1.sToList (P1.semElim elimTm (S1.sFromList tevs)) 
+    `shouldBe` S2.sToList (P2.semElim elimTm (S2.sFromList tevs))
+-}
+{-
+exactSemSpec :: String -> Term -> [TaggedEvent] -> [Event] -> SpecWith ()
+exactSemSpec s tm inp outp = it s (
+    let eltm = inlineElims tm in
+    shouldBe (sToList (denoteElimTerm' eltm (sFromList inp))) outp
+ )
+-}
+
+spec :: Spec
+spec = undefined

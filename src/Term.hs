@@ -42,6 +42,7 @@ data Term where
     -}
     InL :: Term -> Term
     InR :: Term -> Term
+    --          z,        x,        e1,     y,        e2
     PlusCase :: String -> String -> Term -> String -> Term -> Term
     Nil :: Term
     Cons :: Term -> Term -> Term
