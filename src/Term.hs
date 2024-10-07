@@ -53,6 +53,7 @@ data Term where
         ------------------------------------
         G;D;G' |- let x = e in e' : r
     -}
+    -- a    x,        e,      e' 
     Let :: String -> Term -> Term -> Term
     Fix :: Term -> Term
     Rec :: Term
