@@ -118,18 +118,21 @@ updateCtx ctx = do
     (counter, _) <- get
     put (counter, ctx)
     (counter, ctx) <- get
+    return ()
 
 updateCounter :: Int -> StateT (Int, Ctx) Gen ()
 updateCounter counter = do
     (_, ctx) <- get
     put (counter, ctx)
     (counter, ctx) <- get
+    return ()
 
 update :: Ctx -> Int -> StateT (Int, Ctx) Gen ()
 update ctx counter = do
     (counter0, ctx0) <- get
     put (counter, ctx)
     (counter, ctx) <- get
+    return ()
 
 genTm :: Ty -> Ctx -> Int -> Gen Term
 genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
@@ -163,13 +166,12 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             n' <- lift $ choose (0, length ctx)
             let ctx1 = take n' ctx
             let ctx2 = drop (length ctx - n') ctx
-            put (counter, ctx1)
+            updateCtx ctx1
             tm1 <- go ty1 (n `div` 2)
-            (counter', ctx') <- get
-            put (counter', ctx2)
+            updateCtx ctx2
             tm2 <- go ty2 (n `div` 2)
             (counter'', ctx'') <- get
-            put (counter'', ctx' ++ ctx'')
+            updateCtx (ctx' ++ ctx'')
             return $ CatR tm1 tm2
         else
             go' (TyCat ty1 ty2) (n - 1)  -- Ensure recursion depth decreases
@@ -188,86 +190,98 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
                     n' <- lift $ choose (0, length ctx)
                     let ctx1 = take n' ctx
                     let ctx2 = drop (length ctx - n') ctx
-                    put (counter, ctx1)
+                    updateCtx ctx1
                     tm1 <- go t1 (n `div` 2)
-                    (counter', ctx') <- get
-                    put (counter', ctx2)
+                    updateCtx ctx2
                     tm2 <- go (TyStar t1) (n `div` 2)
                     (counter'', ctx'') <- get
-                    put (counter'', ctx' ++ ctx'')
+                    updateCtx (ctx' ++ ctx'')
                     return $ Cons tm1 tm2
         else
             go' (TyStar t1) (n - 1)  -- Ensure recursion depth decreases
+
+    -- `go'` logic
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
     go' _ 0 = return EpsR  -- base case for recursion
     go' r n = do
       choice <- lift $ elements [1..5]
       case choice of
+        -- PlusCase
         1 -> do
-            (counter, ctx) <- get
-            t1 <- lift genTy 
-            let x = "x_" ++ show (counter + 1)
-            put (counter + 1, (x, t1) : ctx)
+            t1 <- lift genTy
+            x <- fresh
+            ctx <- gets snd
+            updateCtx ((x, t1) : ctx)
             tm1 <- go r (n `div` 2)
 
             t2 <- lift genTy
-            let y = "x_" ++ show (counter + 1)
+            y <- fresh
+            ctx <- gets snd
             let ctx' = map (\(v, t) -> if v == x then (y, t2) else (v, t)) ctx
-            put (counter + 1, ctx')
+            updateCtx ctx'
             tm2 <- go r (n `div` 2)
 
-            let z = "x_" ++ show (counter + 1)
-            let ctx'' = map (\(v, t) -> if v == y then (z, TyPlus t1 t2) else (v, t)) ctx'
-            put (counter + 1, ctx'')
+            z <- fresh
+            ctx <- gets snd
+            let ctx'' = map (\(v, t) -> if v == y then (z, TyPlus t1 t2) else (v, t)) ctx
+            updateCtx ctx''
             return $ PlusCase z x tm1 y tm2
 
-        2 -> do                                                                                         -- VarR
-            (counter, ctx) <- get
+        -- VarR
+        2 -> do
+            ctx <- gets snd
             case lookupByType ctx r of
                 Just varName -> return $ Var varName r
                 Nothing -> do
-                    let newVar = "x_" ++ show (counter + 1)
-                    put (counter + 1, (newVar, r) : ctx)
+                    newVar <- fresh
+                    updateCtx ((newVar, r) : ctx)
                     return $ Var newVar r
-        3 -> do                                                                                         -- CatL
-            (counter, ctx) <- get
-            let x = "x_" ++ show (counter + 1)
+
+        -- CatL
+        3 -> do
             t1 <- lift genTy
-            put (counter + 1, (x, t1) : ctx)
-            let y = "x_" ++ show (counter + 1)
+            x <- fresh
+            updateCtx [(x, t1)]
+            
             t2 <- lift genTy
-            put (counter + 1, (y, t2) : ctx)
+            y <- fresh
+            updateCtx [(y, t2)]
+
             e <- go r (n `div` 2)
-            let z = "x_" ++ show (counter + 1)
+
+            z <- fresh
+            ctx <- gets snd
             let ctx' = map (\(v, t) -> if v == x then (z, TyCat t1 t2) else (v, t)) $ filter (\(v, _) -> v /= y) ctx
-            put (counter + 1, ctx')
+            updateCtx ctx'
             return $ CatL x y z e
-        4 -> do                                                                                         -- StarCase
-            -- Run e1 in the current context.
+
+        -- StarCase
+        4 -> do
             e1 <- go r (n `div` 2)
-            (counter, ctx) <- get
 
             -- Choose a random split.
+            ctx <- gets snd
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
             let gamma1 = drop (length ctx - n') ctx
 
             ty1 <- lift genTy
-            let x = "x_" ++ show (counter + 1)
-            let xs = "x_" ++ show (counter + 2)
-            let ctx' = gamma0 ++ [(x, ty1), (xs, TyStar ty1)] ++ gamma1
-            put (counter + 2, ctx')
+            x <- fresh
+            xs <- fresh
+
+            updateCtx (gamma0 ++ [(x, ty1), (xs, TyStar ty1)] ++ gamma1)
 
             e2 <- go r (n `div` 2)
-            (counter', ctx'') <- get
-            let z = "x_" ++ show (counter' + 1)
+            z <- fresh
 
-            let ctx''' = map (\(v, t) -> if v == x then (z, TyStar ty1) else (v, t)) $ filter (\(v, _) -> v /= xs) ctx''
-            put (counter + 1, ctx''')
-
+            ctx <- gets snd
+            let ctx' = map (\(v, t) -> if v == x then (z, TyStar ty1) else (v, t)) $ filter (\(v, _) -> v /= xs) ctx
+            updateCtx ctx'
             return $ StarCase z e1 x xs e2
-        5 -> do                                                                                         -- Let
-            (counter, ctx) <- get
+
+        -- Let
+        5 -> do
+            ctx <- gets snd
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
             let temp = drop (length ctx - n') ctx
@@ -277,18 +291,22 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             let gamma1 = drop (length temp - n'') temp
 
             s <- lift genTy
-            put (counter, delta)
+            updateCtx delta
+
             e <- go ty (n `div` 2)
-            let x = "x_" ++ show (counter + 1)
-            put (counter + 1, gamma0 ++ [(x, s)] ++ gamma1)
+            x <- fresh
+            updateCtx (gamma0 ++ [(x, s)] ++ gamma1)
+
             e' <- go r (n `div` 2)
+            ctx <- gets snd
             let (gamma0', rest) = break (\(v, _) -> v == x) ctx
             let gamma1' = case rest of
                             [] -> []
                             (_:xs) -> xs
-            put (counter, gamma0' ++ delta ++ gamma1')
+            updateCtx (gamma0' ++ delta ++ gamma1')
             return $ Let x e e'
-        _ -> error ""
+
+        _ -> error "Invalid choice"
 
 {-
 exactSemSpec :: String -> Term -> [TaggedEvent] -> [Event] -> SpecWith ()
@@ -297,8 +315,6 @@ exactSemSpec s tm inp outp = it s (
     shouldBe (sToList (denoteElimTerm' eltm (sFromList inp))) outp
  )
 -}
-
-versionEquivalenceSpec :: String -> Term -> 
 
 lookupByType :: Ctx -> Ty -> Maybe String
 lookupByType [] _ = Nothing
