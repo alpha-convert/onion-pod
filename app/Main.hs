@@ -108,9 +108,9 @@ genTy = sized go
 
 fresh :: StateT (Int, Ctx) Gen String
 fresh = do
-    (n, g) <- get
+    (n, ctx) <- get
     let x = "x_" ++ show (n + 1)
-    put (n + 1, g)
+    put (n + 1, ctx)
     return x
 
 genTm :: Ty -> Ctx -> Int -> Gen Term
@@ -257,25 +257,33 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
         4 -> do                                                                                         -- StarCase
             -- Run e1 in the current context.
             e1 <- go r (n `div` 2)
+
+            -- This may have added new bindings--get those.
             (counter, ctx) <- get
 
-            -- Choose a random split.
+            -- Generate a new type, s, and fresh variables for
+            -- x, xs.
+            s <- lift genTy
+            x <- fresh
+            xs <- fresh
+            (counter, ctx) <- get
+
+            -- Choose a random split and insert x, xs.
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
-            let gamma1 = drop (length ctx - n') ctx
+            let gamma1 = (x, s) : (xs, TyStar s) : drop (length ctx - n') ctx
+            put (counter, gamma0 ++ gamma1)
 
-            ty1 <- lift genTy
-            let x = "x_" ++ show (counter + 1)
-            let xs = "x_" ++ show (counter + 2)
-            let ctx' = gamma0 ++ [(x, ty1), (xs, TyStar ty1)] ++ gamma1
-            put (counter + 2, ctx')
-
+            -- Generate e2 in the context containing x : s ; xs : s* ...
             e2 <- go r (n `div` 2)
-            (counter', ctx'') <- get
-            let z = "x_" ++ show (counter' + 1)
 
-            let ctx''' = map (\(v, t) -> if v == x then (z, TyStar ty1) else (v, t)) $ filter (\(v, _) -> v /= xs) ctx''
-            put (counter + 1, ctx''')
+            -- Create a new binding.
+            z <- fresh
+            (counter', ctx') <- get
+
+            -- Remove xs : s* ; replace x : s with z : s*.
+            let ctx'' = map (\(v, t) -> if v == x then (z, TyStar s) else (v, t)) $ filter (\(v, _) -> v /= xs) ctx'
+            put (counter', ctx'')
 
             return $ StarCase z e1 x xs e2
         5 -> do                                                                                         -- Let
