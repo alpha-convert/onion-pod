@@ -251,8 +251,10 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             (counter, ctx) <- get
             -- Is the type we're looking for already in there?
             case lookupByType ctx r of
+
                 -- If it is, return its binding.
                 Just x -> return $ Var x r
+                
                 -- If not, create a new binding and return that.
                 Nothing -> do
                     let x = "x_" ++ show (counter + 1)
@@ -325,25 +327,44 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             return $ StarCase z e1 x xs e2
         5 -> do                                                                                         -- Let
             (counter, ctx) <- get
+
+            -- Choose a split.
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
             let temp = drop (length ctx - n') ctx
 
+            -- Choose a second split...
             n'' <- lift $ choose (0, length temp)
             let delta = take n'' temp
             let gamma1 = drop (length temp - n'') temp
 
+            -- Choose a type for e.
             s <- lift genTy
+
+            -- Generate e : s in context delta.
             put (counter, delta)
-            e <- go ty (n `div` 2)
-            let x = "x_" ++ show (counter + 1)
-            put (counter + 1, gamma0 ++ [(x, s)] ++ gamma1)
-            e' <- go r (n `div` 2)
-            let (gamma0', rest) = break (\(v, _) -> v == x) ctx
+            e <- go s (n `div` 2)
+            
+            -- Create a fresh variable for x, and retrieve any new bindings
+            -- within delta.
+            x <- fresh
+            (counter', delta') <- get
+
+            -- Stitch the context back together, with x : s where delta was.
+            put (counter', gamma0 ++ [(x, s)] ++ gamma1)
+
+            -- Generate e' : s in G0 ; x : s ; G1.
+            e' <- go s (n `div` 2)
+            (counter', gamma') <- get
+
+            -- Remove x : s.
+            let (gamma0', rest) = break (\(v, _) -> v == x) gamma'
             let gamma1' = case rest of
                             [] -> []
                             (_:xs) -> xs
-            put (counter, gamma0' ++ delta ++ gamma1')
+
+            -- Replace with delta'.
+            put (counter', gamma0' ++ delta' ++ gamma1')
             return $ Let x e e'
         _ -> error ""
 
