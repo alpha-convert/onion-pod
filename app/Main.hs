@@ -123,37 +123,49 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
     go TyInt _ = IntR <$> lift arbitrary
     -- TSumR1
     go (TyPlus _ _) 0 = return EpsR
-    go (TyPlus ty1 ty2) n = do
+    go (TyPlus s t) n = do
       choice <- lift $ elements [True, False]
       if choice
         then do
           choice' <- lift $ elements [True, False]
           if choice'
-            then InL <$> go ty1 (n `div` 2)  -- InL
-            else InR <$> go ty2 (n `div` 2)  -- InR
+            then InL <$> go s (n `div` 2)  -- InL
+            else InR <$> go t (n `div` 2)  -- InR
         else
-          go' (TyPlus ty1 ty2) (n - 1)
+          go' (TyPlus s t) (n - 1)
 
     -- CatR
     go (TyCat _ _) 0 = return EpsR
-    go (TyCat ty1 ty2) n = do
+    go (TyCat s t) n = do
       choice <- lift $ elements [True, False]
       if choice
         then do
             (counter, ctx) <- get
+            -- Choose a split in the context.
             n' <- lift $ choose (0, length ctx)
-            let ctx1 = take n' ctx
-            let ctx2 = drop (length ctx - n') ctx
-            put (counter, ctx1)
-            tm1 <- go ty1 (n `div` 2)
-            (counter', ctx') <- get
-            put (counter', ctx2)
-            tm2 <- go ty2 (n `div` 2)
-            (counter'', ctx'') <- get
-            put (counter'', ctx' ++ ctx'')
-            return $ CatR tm1 tm2
+            let gamma = take n' ctx
+            let delta = drop (length ctx - n') ctx
+
+            -- In the context gamma, generate e1.
+            put (counter, gamma)
+            e1 <- go s (n `div` 2)
+
+            -- Retrieve any new bindings.
+            (counter', gamma') <- get
+
+            -- Change the context to delta; generate e2.
+            put (counter', delta)
+            e2 <- go t (n `div` 2)
+
+            -- Retrieve new bindings.
+            (counter', delta') <- get
+
+            -- Restore the original context, plus any new bindings.
+            put (counter', gamma' ++ delta')
+
+            return $ CatR e1 e2
         else
-            go' (TyCat ty1 ty2) (n - 1)
+            go' (TyCat s t) (n - 1)
     go (TyStar _) 0 = return Nil
     go (TyStar t1) n = do
       choice <- lift $ elements [True, False]
@@ -235,12 +247,15 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             return $ PlusCase z x e1 y e2
         2 -> do                                                                                         -- VarR
             (counter, ctx) <- get
+            -- Is the type we're looking for already in there?
             case lookupByType ctx r of
-                Just varName -> return $ Var varName r
+                -- If it is, return its binding.
+                Just x -> return $ Var x r
+                -- If not, create a new binding and return that.
                 Nothing -> do
-                    let newVar = "x_" ++ show (counter + 1)
-                    put (counter + 1, (newVar, r) : ctx)
-                    return $ Var newVar r
+                    let x = "x_" ++ show (counter + 1)
+                    put (counter + 1, (x, r) : ctx)
+                    return $ Var x r
         3 -> do                                                                                         -- CatL
             (counter, ctx) <- get
             let x = "x_" ++ show (counter + 1)
@@ -258,7 +273,7 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             -- Run e1 in the current context.
             e1 <- go r (n `div` 2)
 
-            -- This may have added new bindings--get those.
+            -- This may have added new bindings--retrieve those.
             (counter, ctx) <- get
 
             -- Generate a new type, s, and fresh variables for
