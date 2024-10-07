@@ -122,7 +122,7 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
     -- IntR
     go TyInt _ = IntR <$> lift arbitrary
     -- TSumR1
-    go (TyPlus _ _) 0 = return EpsR  -- base case for recursion
+    go (TyPlus _ _) 0 = return EpsR
     go (TyPlus ty1 ty2) n = do
       choice <- lift $ elements [True, False]
       if choice
@@ -154,7 +154,6 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             return $ CatR tm1 tm2
         else
             go' (TyCat ty1 ty2) (n - 1)
-    -- Star cases
     go (TyStar _) 0 = return Nil
     go (TyStar t1) n = do
       choice <- lift $ elements [True, False]
@@ -162,20 +161,34 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
         then do
             choice' <- lift $ elements [True, False]
             if choice'
-                then return Nil  -- Nil
-                else do
+                then return Nil                                                                         -- Nil
+                else do                                                                                 -- Cons
+                    -- Choose a split.
                     (counter, ctx) <- get
                     n' <- lift $ choose (0, length ctx)
-                    let ctx1 = take n' ctx
-                    let ctx2 = drop (length ctx - n') ctx
-                    put (counter, ctx1)
-                    tm1 <- go t1 (n `div` 2)
-                    (counter', ctx') <- get
-                    put (counter', ctx2)
-                    tm2 <- go (TyStar t1) (n `div` 2)
-                    (counter'', ctx'') <- get
-                    put (counter'', ctx' ++ ctx'')
-                    return $ Cons tm1 tm2
+                    let gamma = take n' ctx
+                    let delta = drop (length ctx - n') ctx
+
+                    -- State is gamma; generate e1 : s in this context.
+                    put (counter, gamma)
+                    e1 <- go t1 (n `div` 2)
+
+                    -- Retrieve the new context, including any new variable
+                    -- bindings.
+                    (counter', gamma') <- get
+
+                    -- Replace with delta--but keep the updated counter to
+                    -- prevent overlapping variable names.
+                    put (counter', delta)
+                    -- Generate e2 : s* in context delta.
+                    e2 <- go (TyStar t1) (n `div` 2)
+
+                    (counter'', delta') <- get
+                    -- Restore the original context, plus any new bindings.
+                    put (counter'', gamma' ++ delta')
+
+                    -- Done!
+                    return $ Cons e1 e2
         else
             go' (TyStar t1) (n - 1)
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
