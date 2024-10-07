@@ -167,7 +167,7 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
         else
             go' (TyCat s t) (n - 1)
     go (TyStar _) 0 = return Nil
-    go (TyStar t1) n = do
+    go (TyStar s) n = do
       choice <- lift $ elements [True, False]
       if choice
         then do
@@ -183,7 +183,7 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
 
                     -- State is gamma; generate e1 : s in this context.
                     put (counter, gamma)
-                    e1 <- go t1 (n `div` 2)
+                    e1 <- go s (n `div` 2)
 
                     -- Retrieve the new context, including any new variable
                     -- bindings.
@@ -192,17 +192,19 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
                     -- Replace with delta--but keep the updated counter to
                     -- prevent overlapping variable names.
                     put (counter', delta)
+
                     -- Generate e2 : s* in context delta.
-                    e2 <- go (TyStar t1) (n `div` 2)
+                    e2 <- go (TyStar s) (n `div` 2)
 
                     (counter'', delta') <- get
+
                     -- Restore the original context, plus any new bindings.
                     put (counter'', gamma' ++ delta')
 
                     -- Done!
                     return $ Cons e1 e2
         else
-            go' (TyStar t1) (n - 1)
+            go' (TyStar s) (n - 1)
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
     go' _ 0 = return EpsR
     go' r n = do
@@ -258,16 +260,36 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
                     return $ Var x r
         3 -> do                                                                                         -- CatL
             (counter, ctx) <- get
-            let x = "x_" ++ show (counter + 1)
-            t1 <- lift genTy
-            put (counter + 1, (x, t1) : ctx)
-            let y = "x_" ++ show (counter + 1)
-            t2 <- lift genTy
-            put (counter + 1, (y, t2) : ctx)
+
+            -- Create bindings for x : s, y : t.
+            x <- fresh
+            y <- fresh
+            s <- lift genTy
+            t <- lift genTy
+            (counter, ctx) <- get
+
+            -- Choose a split.
+            n' <- lift $ choose (0, length ctx)
+            let gamma0 = take n' ctx
+            let gamma1 = (x, s) : (y, t) : drop (length ctx - n') ctx
+
+            -- Update the context with x : s, y : t inserted.
+            put (counter, gamma0 ++ gamma1)
+
+            -- Generate e in that context.
             e <- go r (n `div` 2)
-            let z = "x_" ++ show (counter + 1)
-            let ctx' = map (\(v, t) -> if v == x then (z, TyCat t1 t2) else (v, t)) $ filter (\(v, _) -> v /= y) ctx
-            put (counter + 1, ctx')
+
+            -- Retrieve new bindings and create fresh variable z.
+            (counter, ctx) <- get
+            z <- fresh
+            (counter, ctx) <- get
+
+            -- Replace one of the new bindings with the binding for z : s . t
+            -- ; remove the other.
+            let ctx' = map (\(v, ty') -> if v == x then (z, TyCat s t) else (v, ty')) $ filter (\(v, _) -> v /= y) ctx
+            put (counter, ctx')
+
+            -- Done...
             return $ CatL x y z e
         4 -> do                                                                                         -- StarCase
             -- Run e1 in the current context.
