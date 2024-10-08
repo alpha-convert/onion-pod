@@ -113,8 +113,8 @@ fresh = do
     put (n + 1, ctx)
     return x
 
-genTm :: Ty -> Ctx -> Int -> Gen Term
-genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
+genTm :: Ty -> Ctx -> Int -> Gen (Term, (Int, Ctx))
+genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
   where
     go :: Ty -> Int -> StateT (Int, Ctx) Gen Term
     -- EpsR
@@ -122,7 +122,7 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
     -- IntR
     go TyInt _ = IntR <$> lift arbitrary
     -- TSumR1
-    go (TyPlus _ _) 0 = return EpsR
+    go (TyPlus _ _) 0 = error ""
     go (TyPlus s t) n = do
       choice <- lift $ elements [True, False]
       if choice
@@ -132,10 +132,9 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             then InL <$> go s (n `div` 2)  -- InL
             else InR <$> go t (n `div` 2)  -- InR
         else
-          go' (TyPlus s t) (n - 1)
-
+          go' (TyPlus s t) n
     -- CatR
-    go (TyCat _ _) 0 = return EpsR
+    go (TyCat _ _) 0 = error ""
     go (TyCat s t) n = do
       choice <- lift $ elements [True, False]
       if choice
@@ -165,7 +164,7 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
 
             return $ CatR e1 e2
         else
-            go' (TyCat s t) (n - 1)
+            go' (TyCat s t) n
     go (TyStar _) 0 = return Nil
     go (TyStar s) n = do
       choice <- lift $ elements [True, False]
@@ -204,46 +203,46 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
                     -- Done!
                     return $ Cons e1 e2
         else
-            go' (TyStar s) (n - 1)
+            go' (TyStar s) n
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
     go' _ 0 = return EpsR
     go' r n = do
       choice <- lift $ elements [1..5]
       case choice of
         1 -> do                                                                                         -- PlusCase
-            (counter, ctx) <- get
             -- x : s
             s <- lift genTy 
-            let x = "x_" ++ show (counter + 1)
+            x <- fresh
+            (counter, ctx) <- get
 
             -- Choose a place to insert x : s in the existing context.
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
-            let gamma1 = (x, s) : drop (length ctx - n') ctx
-            put (counter + 1, gamma0 ++ gamma1)
+            let gamma1 = drop (length ctx - n') ctx
+            put (counter, gamma0 ++ [(x, s)] ++ gamma1)
 
             -- Generate e1 in the context containing x : s
             e1 <- go r (n `div` 2)
 
             -- y : t
-            (counter, ctx) <- get
             t <- lift genTy
-            let y = "x_" ++ show (counter + 1)
+            y <- fresh
+            (counter, ctx) <- get
 
             -- Insert y : t where x : s was.
             let ctx' = map (\(v, ty') -> if v == x then (y, t) else (v, ty')) ctx
-            put (counter + 1, ctx')
+            put (counter, ctx')
 
             -- Generate e2.
             e2 <- go r (n `div` 2)
 
             -- z : s + t
-            (counter, ctx) <- get
-            let z = "x_" ++ show (counter + 1)
+            z <- fresh
+            (counter, ctx') <- get
 
             -- Insert z : s + t where y : t was.
             let ctx' = map (\(v, ty') -> if v == y then (z, TyPlus s t) else (v, ty')) ctx
-            put (counter + 1, ctx')
+            put (counter, ctx')
 
             -- Finally done...
             return $ PlusCase z x e1 y e2
@@ -251,21 +250,20 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             (counter, ctx) <- get
             -- Is the type we're looking for already in there?
             case lookupByType ctx r of
-
                 -- If it is, return its binding.
                 Just x -> return $ Var x r
                 
                 -- If not, create a new binding and return that.
                 Nothing -> do
-                    let x = "x_" ++ show (counter + 1)
-                    put (counter + 1, (x, r) : ctx)
+                    x <- fresh
+                    (counter, ctx) <- get
+                    put (counter, (x, r) : ctx)
                     return $ Var x r
         3 -> do                                                                                         -- CatL
-            (counter, ctx) <- get
-
             -- Create bindings for x : s, y : t.
             x <- fresh
             y <- fresh
+
             s <- lift genTy
             t <- lift genTy
             (counter, ctx) <- get
@@ -273,16 +271,15 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             -- Choose a split.
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
-            let gamma1 = (x, s) : (y, t) : drop (length ctx - n') ctx
+            let gamma1 = drop (length ctx - n') ctx
 
             -- Update the context with x : s, y : t inserted.
-            put (counter, gamma0 ++ gamma1)
+            put (counter, gamma0 ++ [(x, s), (y, t)] ++ gamma1)
 
             -- Generate e in that context.
             e <- go r (n `div` 2)
 
             -- Retrieve new bindings and create fresh variable z.
-            (counter, ctx) <- get
             z <- fresh
             (counter, ctx) <- get
 
@@ -310,8 +307,8 @@ genTm ty ctx0 counter0 = sized (\n -> evalStateT (go ty n) (counter0, ctx0))
             -- Choose a random split and insert x, xs.
             n' <- lift $ choose (0, length ctx)
             let gamma0 = take n' ctx
-            let gamma1 = (x, s) : (xs, TyStar s) : drop (length ctx - n') ctx
-            put (counter, gamma0 ++ gamma1)
+            let gamma1 = drop (length ctx - n') ctx
+            put (counter, gamma0 ++ [(x, s), (xs, TyStar s)] ++ gamma1)
 
             -- Generate e2 in the context containing x : s ; xs : s* ...
             e2 <- go r (n `div` 2)
@@ -386,17 +383,29 @@ lookupByType ((var, ty) : rest) targetTy
 
 main :: IO ()
 main = do
-  -- putStrLn "Generated Contexts:"
-  (ctx, counter) <- generate genCtx
+  -- putStrLn "Generated Context and Counter:"
+  
+  -- Generate an initial context and counter
+  -- (ctx, counter) <- generate genCtx
   -- print ctx
   -- print counter
-  
-  -- putStrLn "Generated Types:"
-  ty <- generate genTy
-  
-  
-  putStrLn "Generated Terms:"
-  sample (genTm ty [] counter)
 
-  putStrLn "Generated Types:"
+  putStrLn "\nType:"
+  -- Generate a random type
+  ty <- generate genTy
   print ty
+  
+  -- Generate a term and retrieve the final context and counter using genTm
+  (term, (finalCounter, finalCtx)) <- generate (genTm ty [] 0)
+  
+  -- Print the generated term
+  putStrLn "\nTerm:"
+  print term
+  
+  -- Print the final counter
+  putStrLn "\nCounter:"
+  print finalCounter
+  
+  -- Print the final context
+  putStrLn "\nContext:"
+  print finalCtx
