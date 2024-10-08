@@ -97,8 +97,8 @@ denoteElimTermCps e (SF @s x0 next) = SF (x0, e) next'
                 _ -> error "Unexpected event in PlusCase."
             )
     
-    next' (_, EFix _) _ _ _ = error "Not yet implemented."
-    next' (_, ERec) _ _ _ = error "We don't know how to do this yet."
+    next' (_, EFix _ _ _) _ _ _ = error "Not yet implemented."
+    next' (_, ERec _) _ _ _ = error "We don't know how to do this yet."
 
 denoteElimTermCps' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 denoteElimTermCps' e (S sf) = S (denoteElimTermCps e sf)
