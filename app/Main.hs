@@ -122,7 +122,12 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
     -- IntR
     go TyInt _ = IntR <$> lift arbitrary
     -- TSumR1
-    go (TyPlus _ _) 0 = error ""
+    -- Oops, we bottomed out, make something up?
+    go (TyPlus s t) 0 = do
+      x <- fresh
+      (counter, ctx) <- get
+      put (counter, (x, (TyPlus s t)) : ctx)
+      return $ Var x (TyPlus s t)
     go (TyPlus s t) n = do
       choice <- lift $ elements [True, False]
       if choice
@@ -134,7 +139,11 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
         else
           go' (TyPlus s t) n
     -- CatR
-    go (TyCat _ _) 0 = error ""
+    go (TyCat s t) 0 = do
+      x <- fresh
+      (counter, ctx) <- get
+      put (counter, (x, (TyCat s t)) : ctx)
+      return $ Var x (TyCat s t)
     go (TyCat s t) n = do
       choice <- lift $ elements [True, False]
       if choice
