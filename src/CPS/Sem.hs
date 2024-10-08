@@ -6,10 +6,10 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase #-}
-module PullSemCPS where
+module CPS.Sem where
 
 import ElimTerm
-import StreamCPS
+import CPS.Stream
 import Events
 import Types
 
