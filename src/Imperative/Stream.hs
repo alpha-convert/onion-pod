@@ -11,7 +11,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
-module StatefulTemplateStream  where
+module Imperative.Stream where
 
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
@@ -31,6 +31,7 @@ data StreamFunc m t i a where
 
 data Stream m t i a where
     S :: forall m t i a. (forall w. (i -> Code m (ST t w)) -> Code m (ST t w)) -> StreamFunc m t i a -> Stream m t i a
+
 
 data IStream m t i a where
     IS :: forall m t i a.

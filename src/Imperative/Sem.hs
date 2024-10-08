@@ -8,9 +8,9 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module PullSemCPSStagedImperative where
+module Imperative.Sem where
 import ElimTerm
-import StatefulTemplateStream
+import Imperative.Stream
 import Events
 import Types
 import Language.Haskell.TH
