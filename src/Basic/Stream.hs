@@ -4,7 +4,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Stream (
+module Basic.Stream (
     Step(..),
     Stream(..),
     StreamFunc(..),

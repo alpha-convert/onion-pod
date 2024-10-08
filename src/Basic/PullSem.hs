@@ -1,9 +1,9 @@
 {-# LANGUAGE LambdaCase #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
-module PullSem where
+module Basic.PullSem where
 
 import ElimTerm
-import Stream
+import Basic.Stream
 import Events
 import Types
 
@@ -72,8 +72,8 @@ definitional e (SF x0 next_in) = SF (x0,e) next
                 Yield PlusPuncB (x',_) -> Skip (x',e2)
                 Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
 
-        next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
-        next (x', ERec) = error ""
+        next (x', EFix _ _ _) = error "Unimplemented"
+        next (x', ERec _) = error "Unimplemented"
 
 definitional' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 definitional' a (S sf) = S (definitional a sf)
@@ -118,6 +118,7 @@ semElimTerm (EUse c t) s =
             Done -> Done
             Skip (i',x') -> Skip (i',SPair x' (STy t))
             Yield ev (i',x') -> Yield ev (i', SPair x' (STy (deriv t ev)))
+
 semElimTerm EEpsR (SF x0 _) = SF (x0,SUnit) (const Done)
 semElimTerm (EIntR n) (SF x0 _) = SF (x0,SBool False) (\(x,SBool b) -> if b then Done else Yield (IntEv n) (x,SBool True))
 semElimTerm (ECatR e1 e2) s@(SF i0 _) =
@@ -152,4 +153,6 @@ semElimTerm (EPlusCase c e1 e2) s =
                                                     Skip (i',y') -> Skip (i',SInR (SInR y'))
                                                     Yield ev (i',y') -> Yield ev (i',SInR (SInR y'))
 
+semElimTerm (EFix xs es e) _ = undefined
+semElimTerm (ERec es) _ = undefined
 semElimTerm _ _ = undefined
