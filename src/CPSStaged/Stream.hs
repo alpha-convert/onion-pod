@@ -7,7 +7,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 
-module StreamCPSStaged (
+module CPSStaged.Stream (
     Stream(..),
     StreamFunc(..),
     sFromList',

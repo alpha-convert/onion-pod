@@ -8,9 +8,9 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module PullSemCPSStaged where
+module CPSStaged.Sem where
 import ElimTerm
-import StreamCPSStaged
+import CPSStaged.Stream
 import Events
 import Types
 import Language.Haskell.TH
