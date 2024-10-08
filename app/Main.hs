@@ -121,7 +121,6 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
     go TyEps _ = return EpsR
     -- IntR
     go TyInt _ = IntR <$> lift arbitrary
-    -- TSumR1
     -- Oops, we bottomed out, make something up?
     go (TyPlus s t) 0 = do
       x <- fresh
@@ -214,7 +213,11 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
         else
             go' (TyStar s) n
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
-    go' _ 0 = return EpsR
+    go' r 0 = do
+      x <- fresh
+      (counter, ctx) <- get
+      put (counter, (x, r) : ctx)
+      return $ Var x r
     go' r n = do
       choice <- lift $ elements [1..5]
       case choice of
@@ -381,8 +384,6 @@ exactSemSpec s tm inp outp = it s (
     shouldBe (sToList (denoteElimTerm' eltm (sFromList inp))) outp
  )
 -}
-
--- versionEquivalenceSpec :: String -> Term -> 
 
 lookupByType :: Ctx -> Ty -> Maybe String
 lookupByType [] _ = Nothing
