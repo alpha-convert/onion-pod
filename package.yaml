@@ -24,6 +24,8 @@ dependencies:
 - mtl
 - QuickCheck
 - containers
+- template-haskell  
+- hspec             
 
 ghc-options:
 - -Wall
@@ -60,3 +62,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - Delta-Compiler
+    - hspec            

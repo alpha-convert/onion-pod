@@ -72,8 +72,8 @@ definitional e (SF x0 next_in) = SF (x0,e) next
                 Yield PlusPuncB (x',_) -> Skip (x',e2)
                 Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
 
-        next (x', EFix _ _ _) = error "Unimplemented"
-        next (x', ERec _) = error "Unimplemented"
+        next (x', EFix _) = error "Unimplemented"
+        next (x', ERec) = error "Unimplemented"
 
 definitional' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 definitional' a (S sf) = S (definitional a sf)
@@ -153,6 +153,6 @@ semElimTerm (EPlusCase c e1 e2) s =
                                                     Skip (i',y') -> Skip (i',SInR (SInR y'))
                                                     Yield ev (i',y') -> Yield ev (i',SInR (SInR y'))
 
-semElimTerm (EFix xs es e) _ = undefined
-semElimTerm (ERec es) _ = undefined
+semElimTerm (EFix _) _ = undefined
+semElimTerm (ERec) _ = undefined
 semElimTerm _ _ = undefined
