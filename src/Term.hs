@@ -53,6 +53,17 @@ data Term where
         G;D;G' |- let x = e in e' : r
     -}
     Let :: String -> Term -> Term -> Term
+    {-
+                G |-_{G -> s} e : s
+        ------------------------------------ (uhhhhh)
+            G |- Fix e : s
+    -}
     Fix :: Term -> Term
+    {-
+       
+            G' <: G
+      -------------------------------
+        G' |-_{G -> s} Rec : s
+    -}
     Rec :: Term
     deriving (Eq,Ord,Show)

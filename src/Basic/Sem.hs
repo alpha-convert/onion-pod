@@ -35,13 +35,13 @@ definitional e (SF x0 next_in) = SF (x0,e) next
                     Yield CatPunc (x'',c') -> Skip (x'', c') -- peel off the proj2. this is probably not an ideal way to do this, but oh well. should really be in-place.
 
                     Yield {} -> error ""
-        
+
         nextFromElim x' (LetElim e) =
             case next (x',e) of
                 Done -> Done
                 Skip (x',e') -> Skip (x', LetElim e')
                 Yield ev (x',e') -> Yield ev (x',LetElim e')
-        
+
 
         next (x',EUse c s) =
             if isNull s
@@ -59,7 +59,7 @@ definitional e (SF x0 next_in) = SF (x0,e) next
             case next (x',e1) of
                 Skip (x'',e1') -> Skip (x'',ECatR e1' e2)
                 Yield ev (x'',e1') -> Yield (CatEvA ev) (x'',ECatR e1' e2)
-                Done -> Yield CatPunc (x',e2) 
+                Done -> Yield CatPunc (x',e2)
 
         next (x',EInL e) = Yield PlusPuncA (x',e)
         next (x',EInR e) = Yield PlusPuncB (x',e)
@@ -72,8 +72,8 @@ definitional e (SF x0 next_in) = SF (x0,e) next
                 Yield PlusPuncB (x',_) -> Skip (x',e2)
                 Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
 
-        next (x', EFix _ _ _) = error "Unimplemented"
-        next (x', ERec _) = error "Unimplemented"
+        next (x', EFix e) = Skip (x',fixSubst e e)
+        next (x', ERec) = error "impossible"
 
 definitional' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 definitional' a (S sf) = S (definitional a sf)
@@ -153,6 +153,6 @@ semElimTerm (EPlusCase c e1 e2) s =
                                                     Skip (i',y') -> Skip (i',SInR (SInR y'))
                                                     Yield ev (i',y') -> Yield ev (i',SInR (SInR y'))
 
-semElimTerm (EFix xs es e) _ = undefined
-semElimTerm (ERec es) _ = undefined
+semElimTerm (EFix e) _ = undefined
+semElimTerm ERec s = undefined
 semElimTerm _ _ = undefined

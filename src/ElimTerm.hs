@@ -7,6 +7,7 @@ import Types
 import Term
 import qualified Data.Map as Map
 import Language.Haskell.TH.Syntax
+import GHC.Real (underflowError)
 
 {- Are Elims just a focusing thing? -}
 data Elim where
@@ -80,6 +81,31 @@ data ElimTerm where
 fixSubst :: ElimTerm -> ElimTerm -> ElimTerm
 fixSubst = undefined
 
+-- subst e e' x = e[e'/x]
+{-
+FIXME: this should really be locally nameless. But not entirely clear how to do so. :)
+-}
+subst :: ElimTerm -> ElimTerm -> String -> ElimTerm
+subst e e' x = go e
+    where
+        go EEpsR = EEpsR
+        go (EUse el t) = EUse (goEl el) t
+        go (EIntR n) = EIntR n
+        go (ECatR e1 e2) = ECatR (go e1) (go e2)
+        go (EInR e) = EInR (go e)
+        go (EInL e) = EInL (go e)
+        go (EPlusCase el e1 e2) = EPlusCase (goEl el) (go e1) (go e2)
+        go (EFix e) = EFix e
+        go ERec = ERec
+
+        goEl (VarElim y) | x == y = LetElim e'
+        goEl (VarElim y) | otherwise = VarElim y
+        goEl (Proj1Elim el) = Proj1Elim (goEl el)
+        goEl (Proj2Elim el) = Proj2Elim (goEl el)
+        {- FIXME: hmm this seems like it might be a problem, we're probably capturing like crazy here...-}
+        goEl (LetElim e) = LetElim (go e)
+
+
 inlineElims :: Term -> ElimTerm
 inlineElims e = go mempty e
     where
@@ -106,9 +132,8 @@ inlineElims e = go mempty e
         go m (StarCase z e1 x xs e2) =
             let c = getElim m z in
             EPlusCase c (go m e1) (go (Map.insert x (Proj1Elim (delPi2 c)) (Map.insert xs (Proj2Elim (delPi2 c)) m)) e2)
-        -- go m (Wait x s e) = EWait x s (go (Map.insert x (HistVarElim x) m) e)
-        go m (Fix e) = EFix (go m e)
-        go _ Rec = ERec
+        go m (Fix e') = EFix (go m e')
+        go m Rec = ERec
         go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
 data RunState =
