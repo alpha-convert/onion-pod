@@ -35,6 +35,7 @@ library
       Events
       Imperative.Sem
       Imperative.Stream
+      PartialOrder
       PrettyPrint
       RandomCompile
       Term

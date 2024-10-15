@@ -13,8 +13,10 @@ import Control.Monad (when)
 import Data.List (nub, (\\))
 import Test.Hspec.QuickCheck
 import Test.Hspec
-import Test.QuickCheck
 import Data.List (elemIndex)
+import PartialOrder as PO
+import Data.Set (Set)
+import Control.Monad (replicateM)
 
 type Ctx = [(String, Ty)]
 data Term where
@@ -69,7 +71,7 @@ data Term where
         G;D;G' |- let x = e in e' : r
     -}
     -- a    x,        e,      e' 
-    Let :: String -> Term -> Term -> Term
+    Let :: String -> Ty -> Term -> Term -> Term
     Fix :: Term -> Term
     Rec :: Term
     deriving (Eq,Ord,Show)
@@ -230,7 +232,7 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
         then do
             choice' <- lift $ elements [True, False]
             if choice'
-                then return $ Nil                                                       -- Nil
+                then return $ Nil                                                                       -- Nil
                 else do                                                                                 -- Cons
                     (gamma, delta) <- split
                     replace gamma
@@ -248,59 +250,86 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
       x <- lookupOrBind r
       return $ Var x r
     go' r n = do
-      choice <- lift $ elements [1..5]
+      choice <- lift $ elements [0..4]
       case choice of
-        1 -> do                                                                                       -- PlusCase
-          x <- fresh
-          s <- lift genTy
-          splitAndInsert [(x, s)]
-          e1 <- go r (n `div` 2)
-          y <- fresh
-          t <- lift genTy
-          replaceElement x [(y, t)]
-          e2 <- go r (n `div` 2)
-          z <- fresh
-          replaceElement y [(z, TyPlus s t)]
-          return $ PlusCase z x e1 y e2
-        2 -> do                                                                                         -- VarR
+        0 -> do                                                                                       -- PlusCase
             x <- lookupOrBind r
             return $ Var x r
-        3 -> do                                                                                         -- CatL
-          -- x : s
-          x <- fresh
-          s <- lift genTy
-          -- y : t
-          y <- fresh
-          t <- lift genTy
-          splitAndInsert [(x, s), (y, t)]
-          e <- go r (n `div` 2)
-          z <- fresh
-          replaceElement x [(z, TyCat s t)]
-          replaceElement y []
-          return $ CatL x y z e
+        1 -> do  -- PlusCase
+            x <- fresh
+            s <- lift genTy  -- Generate the type `s` for the left-hand side of the sum
+            t <- lift genTy  -- Generate the type `t` for the right-hand side of the sum
+
+            -- Split the context and insert the new variable x with type `s`
+            splitAndInsert [(x, s)]
+            
+            -- Generate the term for the first branch (left case)
+            e1 <- go r (n `div` 2)
+            
+            -- Create a fresh variable for the second branch and update the context
+            y <- fresh
+            replaceElement x [(y, t)]
+            
+            -- Generate the term for the second branch (right case)
+            e2 <- go r (n `div` 2)
+            
+            -- Now, create a fresh variable z representing the sum type and return the PlusCase term
+            z <- fresh
+            replaceElement y [(z, TyPlus s t)]
+            return $ PlusCase z x e1 y e2
+        2 ->  do  -- CatL Case
+            z <- fresh
+            s <- lift genTy  -- Left type for concatenation
+            t <- lift genTy  -- Right type for concatenation
+
+            -- Generate fresh variables for the components
+            x <- fresh
+            y <- fresh
+
+            -- Split the context and insert `x` and `y`
+            splitAndInsert [(x, s), (y, t)]
+
+            -- Generate the term `e` for the result of concatenation
+            e <- go r (n `div` 2)
+
+            -- After generating `e`, ensure the context respects the type `TyCat s t`
+            replaceElement x [(z, TyCat s t)]
+
+            return $ CatL x y z e
+        3 -> do  -- StarCase
+            z <- fresh
+            s <- lift genTy
+
+            -- Generate e in the environment without z.
+            e <- go s (n `div` 2)
+
+            -- Add z.
+            splitAndInsert [(z, TyStar s)]
+
+            x <- fresh
+            xs <- fresh
+
+            -- Put x, xs where z was.
+            replaceElement z [(x, s), (xs, TyStar s)]
+
+            es <- go (TyStar s) (n `div` 2)
+
+            replaceElement x [(z, TyStar s)]
+            replaceElement xs []
+
+            return $ StarCase z e x xs es
         4 -> do
-          e1 <- go r (n `div` 2)
-          x <- fresh
-          xs <- fresh
-          s <- lift genTy
-          splitAndInsert [(x, s), (xs, TyStar s)]
-          e2 <- go r (n `div` 2)
-          z <- fresh
-          replaceElement x [(z, TyStar s)]
-          replaceElement xs []
-          return $ StarCase z e1 x xs e2
-        5 -> do
-          x <- fresh
-          s <- lift genTy
-          delta <- fillHole [(x, s)]
-          e' <- go s (n `div` 2)
-          (_, ctx') <- get
-          replace delta
-          e <- go s (n `div` 2)
-          (_, delta') <- get
-          replace ctx'
-          replaceElement x delta'
-          return $ Let x e e'
+            x <- fresh
+            s <- lift genTy
+            delta <- fillHole [(x, s)]
+            e' <- go r (n `div` 2)
+            (_, ctx') <- get
+            replace delta
+            e <- go s (n `div` 2)
+            (_, delta') <- get
+            replace ctx'
+            replaceElement x delta'
+            return $ Let x s e e'
         _ -> error ""
 
 lookup :: Ctx -> String -> Maybe Ty
@@ -309,91 +338,169 @@ lookup ((k, v) : rest) x
     | k == x = Just v
     | otherwise = Main.lookup rest x
 
+replaceElement' :: Ctx -> String -> Ctx -> Ctx
+replaceElement' ctx x ctx' =
+  let (ctx0, rest) = break (\(b, _) -> b == x) ctx
+      ctx1 = case rest of
+               [] -> []              
+               (_ : rest') -> rest'
+  in ctx0 ++ ctx' ++ ctx1
+
+data Error = TypeMismatch Ty Ty 
+           | OrderViolation 
+           | NotImplemented Term 
+           | LookupFailed String
+           deriving (Show, Eq)
+
 getIndices :: Ctx -> [String] -> [Int]
 getIndices ctx vars = mapMaybe (`toIndex` ctx) vars
 
 toIndex :: String -> Ctx -> Maybe Int
 toIndex x ctx = elemIndex x (map fst ctx)
 
-ordered :: Ctx -> [String] -> [String] -> Bool
-ordered ctx vars1 vars2 =
-    let idxs1 = getIndices ctx vars1
-        idxs2 = getIndices ctx vars2
-    in all (\hidx -> all (hidx <) idxs2) idxs1
+matchType :: Ty -> (Ty, PO.Pairs) -> Either Error (Ty, PO.Pairs)
+matchType expected (actual, order)
+    | actual == expected = Right (actual, order)
+    | otherwise = Left $ TypeMismatch actual expected
 
-{-
-check :: Ctx -> Term -> Either String (Ty, [String])
-check _ (EpsR) = return (TyEps, [])
-check _ (IntR _) = return (TyInt, [])
-check _ (Nil s) = return (TyStar s, [])
+imposeSequentialOrder :: Ty -> PO.Pairs -> PO.Pairs -> Either Error (Ty, PO.Pairs)
+imposeSequentialOrder ty path1 path2 = 
+  let path' = PO.concat' path1 path2
+  in case PO.isAntisymmetric path' of
+       Just _ -> Left OrderViolation
+       Nothing -> Right (ty, path') 
 
-check ctx (Var x s) = 
-  case Main.lookup ctx x of
-    Just v -> if v == s 
-      then 
-        return (s, [x])
-      else
-        Left $ "Type error in variable use. The expected type was " ++ show s ++ ", but the type in the context was " ++ show v ++ "."
-    Nothing -> Left $ "Variable " ++ x ++ " not found in context."
-check ctx (CatR e1 e2) = do
-  (s, e1uses) <- check ctx e1
-  (t, e2uses) <- check ctx e2
-  if ordered ctx e1uses e2uses
-    then
-      return ((TyCat s t), (e1uses ++ e2uses))
-    else
-      Left $ "Interleaved uses in concatenation."
-check ctx (CatL x y z e) = undefined
-check ctx (Cons e es) = do
-  (ht, huses) <- check ctx e
-  (tt, tuses) <- check ctx es
-  case tt of
-    (TyStar et) -> if et == ht -- Element type matches head type.
-      then
-        if ordered ctx huses tuses
-        then return (TyStar et, huses ++ tuses)
-        else Left $ "Head and tail variables are interleaved."
-      else
-        Left $ "Head type, " ++ show ht ++ " doesn't match element type, " ++ show et ++ "."
-    _ -> Left $ "Tail not a list, instead it is a " ++ show tt ++ "!"
-check ctx (StarCase z e x xs es) = undefined
-check ctx (InL e) = undefined
-check ctx (InR e) = undefined
-check ctx (PlusCase z x e1 y e2) = undefined
+imposeUnionOrder :: Ty -> PO.Pairs -> PO.Pairs -> Either Error (Ty, PO.Pairs)
+imposeUnionOrder ty path1 path2 =
+  let path' = PO.union path1 path2
+  in case PO.isAntisymmetric path' of
+       Just _ -> Left OrderViolation
+       Nothing -> Right (ty, path')
 
-check ctx (Let x e e') = undefined
+check :: Ctx -> Term -> Ty -> Either Error (Ty, PO.Pairs)
+check _ (EpsR) s = matchType s (TyEps, PO.empty)
+check _ (IntR _) s = matchType s (TyInt, PO.empty)
+check _ Nil s = Right (s, PO.empty)
 
-check ctx (Rec) = error "We don't know how to think about Rec yet."
-check ctx (Fix e) = error "We don't know how to think about Fix yet."
+check ctx (Var x s) s' = do
+    matchType s' (s, PO.empty) >>= \(_, po) ->
+        case Main.lookup ctx x of
+            Just s'' -> matchType s'' (s, po)
+            Nothing  -> Left $ LookupFailed x
 
+check ctx (Cons eh et) ss = 
+    case ss of
+        (TyStar s) -> do
+            check ctx eh s >>= \(_, hOrder) ->
+                check ctx et (TyStar s) >>= \(_, tOrder) ->
+                    imposeSequentialOrder ss hOrder tOrder
+        _ -> Left $ TypeMismatch ss (TyStar undefined)
 
--- Property: All generated terms should pass the type checker.
-prop_checks :: Property
-prop_checks = forAll genTy $ \ty ->
-    forAll (sized (\n -> genTm ty [] 0)) $ \(term, _) ->
-        case check [] term of
-            Right _ -> True   -- Type checking succeeded.
-            Left _ -> False   -- Type checking failed.
--}
+check ctx (CatR e1 e2) st =
+    case st of
+        (TyCat s t) -> do
+            check ctx e1 s >>= \(_, e1Order) ->
+                check ctx e2 t >>= \(_, e2Order) ->
+                    imposeSequentialOrder st e1Order e2Order
+        _ -> Left $ TypeMismatch st (TyCat undefined undefined)
 
+check ctx (CatL x y z e) r =
+    case Main.lookup ctx z of
+        Just (TyCat s t) -> do
+            let ctx' = replaceElement' ctx z [(x, s), (y, t)]
+            check ctx' e r >>= \(_, eOrder) ->
+                if PO.lessThan x y eOrder
+                then return (r, eOrder)
+                else Left OrderViolation
+        _ -> Left $ LookupFailed z
+
+check ctx (InL e) st =
+    case st of 
+        (TyPlus s _) -> check ctx e s
+        _ -> Left $ TypeMismatch st (TyPlus undefined undefined)
+
+check ctx (InR e) st =
+    case st of 
+        (TyPlus _ t) -> check ctx e t
+        _ -> Left $ TypeMismatch st (TyPlus undefined undefined)
+
+check ctx (PlusCase z x e1 y e2) r =
+    case Main.lookup ctx z of
+        Just (TyPlus s t) -> do
+            let ctx' = replaceElement' ctx z [(x, s)]
+            check ctx' e1 r >>= \(_, e1Order) -> do
+                let ctx'' = replaceElement' ctx z [(y, t)]
+                check ctx'' e2 r >>= \(_, e2Order) ->
+                    imposeUnionOrder r e1Order e2Order
+        _ -> Left $ LookupFailed z
+
+check ctx (StarCase z e x xs es) r =
+    case Main.lookup ctx z of
+        Just (TyStar s) -> do
+            let ctx' = replaceElement' ctx z []
+            check ctx' e s >>= \(_, eOrder) -> do
+                let ctx'' = replaceElement' ctx z [(x, s), (xs, TyStar s)]
+                check ctx'' es (TyStar s) >>= \(_, esOrder) ->
+                    if PO.lessThan x xs esOrder
+                        then imposeUnionOrder r eOrder esOrder
+                        else Left OrderViolation
+        _ -> Left $ LookupFailed z
+
+check ctx (Let x s e e') r = do
+    (_, eUses) <- check ctx e s
+    (e't, e'Uses) <- check (ctx ++ [(x, s)]) e' r
+    imposeUnionOrder e't eUses (PO.substAll (map fst (PO.toList eUses)) x e'Uses)
+
+check _ term _ = Left $ NotImplemented term
+
+data ErrorCount = ErrorCount {
+    orderViolations   :: Int,
+    typeMismatches    :: Int,
+    lookupFailures    :: Int,
+    notImplemented    :: Int
+} deriving (Show)
+
+categorizeError :: Error -> ErrorCount -> ErrorCount
+categorizeError (TypeMismatch _ _) counts = counts { typeMismatches = typeMismatches counts + 1 }
+categorizeError OrderViolation counts     = counts { orderViolations = orderViolations counts + 1 }
+categorizeError (LookupFailed _) counts   = counts { lookupFailures = lookupFailures counts + 1 }
+categorizeError (NotImplemented _) counts = counts { notImplemented = notImplemented counts + 1 }
+
+initialErrorCount :: ErrorCount
+initialErrorCount = ErrorCount 0 0 0 0
+
+prop_check_term :: Gen (Either Error ())
+prop_check_term = do
+  ty <- genTy
+  (term, (counter, ctx)) <- genTm ty [] 0
+  return $ case check ctx term ty of
+    Right _  -> Right ()
+    Left err -> Left err
+
+runAndReport :: IO ()
+runAndReport = do
+  results <- generate (replicateM 100 prop_check_term)
+
+  let (successes, errorCounts) = foldl categorizeResult (0, initialErrorCount) results
+
+  let numFailed = 100 - successes
+
+  putStrLn $ "Total terms generated: " ++ show 100
+  putStrLn $ "Successful type checks: " ++ show successes
+  putStrLn $ "Failed type checks: " ++ show numFailed
+  putStrLn $ "Success rate: " ++ show (fromIntegral successes / fromIntegral 100 * 100) ++ "%"
+  putStrLn $ "Failure rate: " ++ show (fromIntegral numFailed / fromIntegral 100 * 100) ++ "%"
+
+  putStrLn "\nError breakdown:"
+  putStrLn $ "Order Violations: " ++ show (orderViolations errorCounts)
+  putStrLn $ "Type Mismatches: " ++ show (typeMismatches errorCounts)
+  putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
+  putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
+
+categorizeResult :: (Int, ErrorCount) -> Either Error () -> (Int, ErrorCount)
+categorizeResult (successes, counts) (Right _) = (successes + 1, counts)  -- Success
+categorizeResult (successes, counts) (Left err) = (successes, categorizeError err counts)  -- Failure with error
+
+-- Main function to run the test
 main :: IO ()
-main = do
-  putStrLn "\nType:"
-  -- Generate a random type
-  ty <- generate genTy
-  print ty
-  
-  -- Generate a term and retrieve the final context and counter using genTm
-  (term, (finalCounter, finalCtx)) <- generate (genTm ty [] 0)
-  
-  -- Print the generated term
-  putStrLn "\nTerm:"
-  print term
-  
-  -- Print the final counter
-  putStrLn "\nCounter:"
-  print finalCounter
-  
-  -- Print the final context
-  putStrLn "\nContext:"
-  print finalCtx
+main = runAndReport
