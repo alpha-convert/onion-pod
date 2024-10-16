@@ -60,14 +60,12 @@ delete a s = Set.foldr (\(Pair (b, c)) acc ->
     then acc
     else Set.insert (Pair (b, c)) acc) Set.empty s
 
--- Check if a < b (i.e., (a, b) exists in the set)
 lessThan :: String -> String -> Pairs -> Bool
 lessThan a b s = Set.member (Pair (a, b)) s
 
 greaterThan :: String -> String -> Pairs -> Bool
-greaterThan b a s = Set.member (Pair (b, a)) s
+greaterThan a b s = Set.member (Pair (a, b)) s
 
--- Check if a and b are comparable (i.e., (a, b) or (b, a) exists)
 comparable :: String -> String -> Pairs -> Bool
 comparable a b s = lessThan a b s || lessThan b a s
 

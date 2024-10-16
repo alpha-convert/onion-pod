@@ -384,14 +384,14 @@ check ctx (CatR e1 e2) st =
         _ -> Left $ TypeMismatch
 
 check ctx (CatL x y z e) st = 
-  lookup' ctx z >>= \(zt, zOrder) -> 
+  lookup' ctx z >>= \(zt, _) -> 
       case zt of 
           (TyCat s t) -> do
             let ctx' = replaceElement' ctx z [Pair x s y t]
             check ctx' e st >>= \(_, eOrder) ->
-              if PO.lessThan x y eOrder
-                then Left OrderViolation 
-                else return (st, eOrder) 
+              if not (PO.greaterThan y x eOrder)
+                then return (st, eOrder)
+                else Left $ OrderViolation
           _ -> Left $ TypeMismatch
 
 check ctx (InL e) st =
@@ -424,11 +424,12 @@ check ctx (StarCase z e x xs es) r =
         check ctx' e s >>= \(_, eOrder) -> do
           let ctx'' = replaceElement' ctx z [Pair x s xs (TyStar s)]
           check ctx'' es (TyStar s) >>= \(_, esOrder) ->
-            if PO.greaterThan x xs esOrder
-              then Left OrderViolation
-              else
+            if not (PO.greaterThan x xs esOrder)
+              then
                 orderUnion r eOrder esOrder >>= \(_, combinedOrder) ->
                   orderSequential r zOrder combinedOrder
+              else
+                Left $ OrderViolation
       _ -> Left $ TypeMismatch
 
 check ctx (Let x s e e') r = do
@@ -460,22 +461,25 @@ prop_check_term = do
   ty <- genTy
   (term, (_, ctx)) <- genTm ty
   return $ case check ctx term ty of
-    Right (ty, pairs) -> Right (pairs, (ty, pairs))  -- Replace `PO.empty` with actual PO data
+    Right (ty, pairs) -> Right (pairs, (ty, pairs))
     Left err     -> Left err
 
 runAndReport :: IO ()
 runAndReport = do
-  results <- generate (replicateM 100 prop_check_term)
+  results <- generate (replicateM 1000 prop_check_term)
 
   let (successes, errorCounts, orders) = foldl categorizeResult (0, initialErrorCount, []) results
 
-  let numFailed = 100 - successes
+  let numFailed = 1000 - successes
 
-  putStrLn $ "Total terms generated: " ++ show 100
+  putStrLn "\nPartial Orders from Successful Type Checks:"
+  mapM_ (putStrLn . show) orders
+
+  putStrLn $ "Total terms generated: " ++ show 1000
   putStrLn $ "Successful type checks: " ++ show successes
   putStrLn $ "Failed type checks: " ++ show numFailed
-  putStrLn $ "Success rate: " ++ show (fromIntegral successes / 100 * 100) ++ "%"
-  putStrLn $ "Failure rate: " ++ show (fromIntegral numFailed / 100 * 100) ++ "%"
+  putStrLn $ "Success rate: " ++ show (fromIntegral successes / 1000 * 100) ++ "%"
+  putStrLn $ "Failure rate: " ++ show (fromIntegral numFailed / 1000 * 100) ++ "%"
 
   putStrLn "\nError breakdown:"
   putStrLn $ "Order Violations: " ++ show (orderViolations errorCounts)
@@ -483,8 +487,6 @@ runAndReport = do
   putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
   putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
 
-  putStrLn "\nPartial Orders from Successful Type Checks:"
-  mapM_ (putStrLn . show) orders
 
 categorizeResult :: (Int, ErrorCount, [PO.Pairs]) -> Either Error (PO.Pairs, (Ty, PO.Pairs)) -> (Int, ErrorCount, [PO.Pairs])
 categorizeResult (successes, counts, orders) (Right (po, _)) =
