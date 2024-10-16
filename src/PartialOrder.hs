@@ -25,35 +25,27 @@ module PartialOrder (
 
 import qualified Data.Set as Set
 
--- Define a new type for a pair of strings
 newtype Pair = Pair (String, String) deriving (Eq, Show)
 
--- Define the Ord instance for Pair
 instance Ord Pair where
   compare (Pair (a1, a2)) (Pair (b1, b2)) =
     let first = compare a1 b1
     in if first == EQ then compare a2 b2 else first
 
--- Define the type for a set of pairs
 type Pairs = Set.Set Pair
 
--- Empty set of pairs
 empty :: Pairs
 empty = Set.empty
 
--- Singleton set with a pair
 singleton :: (String, String) -> Pairs
 singleton = Set.singleton . Pair
 
--- Check if a pair is in the set
 contains :: (String, String) -> Pairs -> Bool
 contains p = Set.member (Pair p)
 
--- Insert a pair into the set
 insert :: (String, String) -> Pairs -> Pairs
 insert p = Set.insert (Pair p)
 
--- Delete all pairs where either element matches the string `a`
 delete :: String -> Pairs -> Pairs
 delete a s = Set.foldr (\(Pair (b, c)) acc -> 
     if b == a || c == a 
@@ -69,7 +61,6 @@ greaterThan a b s = Set.member (Pair (a, b)) s
 comparable :: String -> String -> Pairs -> Bool
 comparable a b s = lessThan a b s || lessThan b a s
 
--- Convert the set of pairs to a list
 toList :: Pairs -> [(String, String)]
 toList = map (\(Pair p) -> p) . Set.toList
 

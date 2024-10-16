@@ -487,12 +487,11 @@ runAndReport = do
   putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
   putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
 
-
 categorizeResult :: (Int, ErrorCount, [PO.Pairs]) -> Either Error (PO.Pairs, (Ty, PO.Pairs)) -> (Int, ErrorCount, [PO.Pairs])
 categorizeResult (successes, counts, orders) (Right (po, _)) =
-  (successes + 1, counts, po : orders)  -- Collect partial orders
+  (successes + 1, counts, po : orders)
 categorizeResult (successes, counts, orders) (Left err) =
-  (successes, categorizeError err counts, orders)  -- Failure with error
+  (successes, categorizeError err counts, orders)
 
 main :: IO ()
 main = runAndReport
