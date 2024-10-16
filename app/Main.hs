@@ -18,7 +18,18 @@ import PartialOrder as PO
 import Data.Set (Set)
 import Control.Monad (replicateM)
 
-type Ctx = [(String, Ty)]
+-- type Ctx = [(String, Ty)]
+
+data Binding = Atom String Ty | Pair String Ty String Ty
+type Ctx = [Binding]
+
+extractBindings :: Ctx -> [(String, Ty)]
+extractBindings = concatMap extractBinding
+  where
+    extractBinding :: Binding -> [(String, Ty)]
+    extractBinding (Atom x ty)      = [(x, ty)]
+    extractBinding (Pair x1 ty1 x2 ty2) = [(x1, ty1), (x2, ty2)]
+
 data Term where
     {-
     --------------
@@ -87,40 +98,59 @@ genTy = sized go
                      , (1, return TyInt)]
 
 -- Create a fresh variable and return it.
-fresh :: StateT (Int, Ctx) Gen String
+fresh :: StateT (Int, Ctx, PO.Pairs) Gen String
 fresh = do
-    (n, ctx) <- get
+    (n, ctx, pairs) <- get
     let x = "y_" ++ show (n + 1)
-    put (n + 1, ctx)
+    put (n + 1, ctx, pairs)
     return x
 
 -- Add a binding to the context.
-add :: (String, Ty) -> StateT (Int, Ctx) Gen ()
+add :: Binding -> StateT (Int, Ctx, PO.Pairs) Gen ()
 add el = do
-  (n, ctx) <- get
-  put (n, safeConcat ctx [el])
+  (n, ctx, pairs) <- get
+  put (n, safeConcat ctx [el], pairs)
 
 safeConcat :: Ctx -> Ctx -> Ctx
+safeConcat ctx1 ctx2 =
+  let
+    allBindings1 = extractBindings ctx1
+    allBindings2 = extractBindings ctx2
+    
+    vars1 = map fst allBindings1
+    vars2 = map fst allBindings2
+
+    duplicates = [x | x <- vars1, x `elem` vars2]
+    
+  in
+    if null (duplicates)
+    then ctx1 ++ ctx2
+    else error $ "Duplicate bindings found: " ++ show duplicates
+
+{- safeConcat :: Ctx -> Ctx -> Ctx
 safeConcat ctx1 ctx2 =
   let duplicates = [x | (x, _) <- ctx1, x `elem` map fst ctx2]
   in if null (duplicates)
      then ctx1 ++ ctx2
      else error $ "Duplicate bindings found: " 
      ++ show duplicates 
+-}
 
 -- Replace the context with a new context.
-replace :: Ctx -> StateT (Int, Ctx) Gen ()
+replace :: Ctx -> StateT (Int, Ctx, PO.Pairs) Gen ()
 replace ctx' = do
-  (n, _) <- get
-  put (n, ctx')
+  (n, _, pairs) <- get
+  put (n, ctx', pairs)
 
-replaceElement :: String -> Ctx -> StateT (Int, Ctx) Gen ()
+replaceElement :: String -> Ctx -> StateT (Int, Ctx, PO.Pairs) Gen ()
 replaceElement x ctx' = do
-  (_, ctx) <- get
+  (_, ctx, pairs) <- get
+
   let (ctx0, rest) = break (\(b, _) -> b == x) ctx
   let ctx1 = case rest of
         [] -> []              
         (_ : rest') -> rest'      
+  
   replace $ (safeConcat (safeConcat ctx0 ctx') ctx1)
 
 -- See if there's a binding of some type in the context already.
@@ -132,24 +162,24 @@ lookupByType ((var, ty) : rest) targetTy
 
 -- Create a binding of a certain type, add it to the context, and return
 -- the name.
-binding :: Ty -> StateT (Int, Ctx) Gen String
+binding :: Ty -> StateT (Int, Ctx, PO.Pairs) Gen String
 binding s = do
   x <- fresh
   add (x, s)
   return x
 
-lookupOrBind :: Ty -> StateT (Int, Ctx) Gen String
+lookupOrBind :: Ty -> StateT (Int, Ctx, PO.Pairs) Gen String
 lookupOrBind s = do
-  (_, ctx) <- get
+  (_, ctx, _) <- get
   case lookupByType ctx s of
     Just x -> return x
     Nothing -> do
       x <- binding s
       return x
 
-split :: StateT (Int, Ctx) Gen (Ctx, Ctx)
+split :: StateT (Int, Ctx, PO.Pairs) Gen (Ctx, Ctx)
 split = do
-  (_, ctx) <- get
+  (_, ctx, _) <- get
   n <- lift $ choose (0, length ctx)
   
   let ctx0 = take n ctx
@@ -157,9 +187,9 @@ split = do
   
   return (ctx0, ctx1)
 
-fillHole :: Ctx -> StateT (Int, Ctx) Gen Ctx
+fillHole :: Ctx -> StateT (Int, Ctx, PO.Pairs) Gen Ctx
 fillHole ctx = do
-  (_, ctx') <- get
+  (_, ctx', _) <- get
   n <- lift $ choose (0, length ctx')
   
   let ctx0 = take n ctx'
@@ -174,7 +204,13 @@ fillHole ctx = do
 
   return delta
 
-splitAndInsert :: Ctx -> StateT (Int, Ctx) Gen ()
+insertConstraint :: (String, String) -> StateT (Int, Ctx, PO.Pairs) Gen ()
+insertConstraint constraint = do
+    (counter, ctx, order) <- get
+    let order' = PO.insert constraint order
+    put (counter, ctx, order')
+
+splitAndInsert :: Ctx -> StateT (Int, Ctx, PO.Pairs) Gen ()
 splitAndInsert ctx = do
   (ctx0, ctx1) <- split
   replace $ safeConcat (safeConcat ctx0 ctx) ctx1
@@ -184,19 +220,19 @@ choose' bools opt1 opt2 = do
   choice <- bools
   if choice then opt1 else opt2
 
-genTm :: Ty -> Ctx -> Int -> Gen (Term, (Int, Ctx))
-genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
+genTm :: Ty -> Ctx -> Int -> Gen (Term, (Int, Ctx, PO.Pairs))
+genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0, PO.empty))
   where
-    go :: Ty -> Int -> StateT (Int, Ctx) Gen Term
-    -- EpsR
+    go :: Ty -> Int -> StateT (Int, Ctx, PO.Pairs) Gen Term
+                                                                                            -- EpsR
     go TyEps _ = return EpsR
-    -- IntR
+                                                                                            -- IntR
     go TyInt _ = IntR <$> lift arbitrary
     -- Oops, we bottomed out, make something up?
-    go (TyPlus s t) 0 = do
+    go (TyPlus s t) 0 = do  
       x <- lookupOrBind (TyPlus s t)
       return $ Var x (TyPlus s t)
-    go (TyPlus s t) n = do
+    go (TyPlus s t) n = do                                                                  -- PlusR
       choice <- lift $ elements [True, False]
       if choice
         then do
@@ -206,97 +242,87 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
             else InR <$> go t (n `div` 2)  -- InR
         else
           go' (TyPlus s t) n
-    -- CatR
     go (TyCat s t) 0 = do
       x <- lookupOrBind (TyCat s t)
       return $ Var x (TyCat s t)
-    go (TyCat s t) n = do
+    go (TyCat s t) n = do                                                                   -- CatR
       choice <- lift $ elements [True, False]
       if choice 
         then do
           (gamma, delta) <- split
           replace gamma
           e1 <- go s (n `div` 2)
-          (_, gamma') <- get
+          (_, gamma', _) <- get
           replace delta
           e2 <- go t (n `div` 2)
-          (_, delta') <- get
+          (_, delta', _) <- get
           replace (safeConcat gamma' delta')
           return $ CatR e1 e2
         else
           go' (TyCat s t) n
-    go (TyStar s) 0 = return $ Nil
+    go (TyStar _) 0 = return $ Nil
     go (TyStar s) n = do
       choice <- lift $ elements [True, False]
       if choice
         then do
             choice' <- lift $ elements [True, False]
             if choice'
-                then return $ Nil                                                                       -- Nil
-                else do                                                                                 -- Cons
+                then return $ Nil                                                            -- Nil
+                else do                                                                      -- Cons
                     (gamma, delta) <- split
                     replace gamma
                     e1 <- go s (n `div` 2)
-                    (_, gamma') <- get
+                    (_, gamma', _) <- get
                     replace delta
                     e2 <- go (TyStar s) (n `div` 2)
-                    (_, delta') <- get
+                    (_, delta', _) <- get
                     replace (gamma' ++ delta')
                     return $ Cons e1 e2
         else
             go' (TyStar s) n
-    go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
+    go' :: Ty -> Int -> StateT (Int, Ctx, PO.Pairs) Gen Term
     go' r 0 = do
       x <- lookupOrBind r
       return $ Var x r
     go' r n = do
       choice <- lift $ elements [0..4]
       case choice of
-        0 -> do                                                                                       -- PlusCase
+        0 -> do                                                                             -- Var
             x <- lookupOrBind r
             return $ Var x r
-        1 -> do  -- PlusCase
+        1 -> do                                                                             -- PlusCase
             x <- fresh
-            s <- lift genTy  -- Generate the type `s` for the left-hand side of the sum
-            t <- lift genTy  -- Generate the type `t` for the right-hand side of the sum
+            s <- lift genTy
+            t <- lift genTy 
 
-            -- Split the context and insert the new variable x with type `s`
             splitAndInsert [(x, s)]
             
-            -- Generate the term for the first branch (left case)
             e1 <- go r (n `div` 2)
             
-            -- Create a fresh variable for the second branch and update the context
             y <- fresh
             replaceElement x [(y, t)]
             
-            -- Generate the term for the second branch (right case)
             e2 <- go r (n `div` 2)
             
-            -- Now, create a fresh variable z representing the sum type and return the PlusCase term
             z <- fresh
             replaceElement y [(z, TyPlus s t)]
             return $ PlusCase z x e1 y e2
-        2 ->  do  -- CatL Case
+        2 ->  do                                                                            -- CatL Case
             z <- fresh
-            s <- lift genTy  -- Left type for concatenation
-            t <- lift genTy  -- Right type for concatenation
-
-            -- Generate fresh variables for the components
+            s <- lift genTy
+            t <- lift genTy
             x <- fresh
             y <- fresh
 
-            -- Split the context and insert `x` and `y`
             splitAndInsert [(x, s), (y, t)]
+            insertConstraint (x, y)
 
-            -- Generate the term `e` for the result of concatenation
             e <- go r (n `div` 2)
 
-            -- After generating `e`, ensure the context respects the type `TyCat s t`
             replaceElement x [(z, TyCat s t)]
 
             return $ CatL x y z e
-        3 -> do  -- StarCase
+        3 -> do                                                                             -- StarCase
             z <- fresh
             s <- lift genTy
 
@@ -311,6 +337,7 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
 
             -- Put x, xs where z was.
             replaceElement z [(x, s), (xs, TyStar s)]
+            insertConstraint (x, xs)
 
             es <- go (TyStar s) (n `div` 2)
 
@@ -318,19 +345,62 @@ genTm ty ctx0 counter0 = sized (\n -> runStateT (go ty n) (counter0, ctx0))
             replaceElement xs []
 
             return $ StarCase z e x xs es
-        4 -> do
+        4 -> do                                                                             -- Let
             x <- fresh
             s <- lift genTy
+
             delta <- fillHole [(x, s)]
+
             e' <- go r (n `div` 2)
-            (_, ctx') <- get
+            (_, ctx', _) <- get
+
             replace delta
+
             e <- go s (n `div` 2)
-            (_, delta') <- get
+            (_, delta', _) <- get
+
             replace ctx'
             replaceElement x delta'
+
             return $ Let x s e e'
         _ -> error ""
+
+retryUntilValid :: Gen Term -> Gen Term
+retryUntilValid genTerm = do
+    term <- genTerm
+    -- Check if the term respects variable ordering
+    if checkOrder term
+        then return term
+        else retryUntilValid genTerm
+
+checkOrder :: Term -> Bool
+checkOrder (CatL x y _ e) = validOrder x y e
+checkOrder (StarCase _ _ x xs e) = validOrder x xs e
+checkOrder _ = True
+
+-- Ensure that x comes before y in the term
+validOrder :: String -> String -> Term -> Bool
+validOrder x y term =
+    let vars = collectVars term
+    in case (elemIndex x vars, elemIndex y vars) of
+        (Just xIdx, Just yIdx) -> xIdx < yIdx
+        _ -> True
+
+collectVars :: Term -> [String]
+collectVars (EpsR) = []
+collectVars (IntR _) = []
+collectVars (Var x _) = [x]
+collectVars (CatL x y _ e) = [x, y] ++ collectVars e
+collectVars (CatR e1 e2) = collectVars e1 ++ collectVars e2
+collectVars (Cons e1 e2) = collectVars e1 ++ collectVars e2
+collectVars (Nil) = []
+collectVars (InL e) = collectVars e
+collectVars (InR e) = collectVars e
+collectVars (PlusCase _ _ e1 _ e2) = collectVars e1 ++ collectVars e2
+collectVars (StarCase _ e x xs es) = [x, xs] ++ collectVars e ++ collectVars es
+collectVars (Let x _ e e') = [x] ++ collectVars e ++ collectVars e'
+collectVars (Fix _) = error "Not implemented yet."
+collectVars (Rec) = error "Not implemented yet."
 
 lookup :: Ctx -> String -> Maybe Ty
 lookup [] _ = Nothing
@@ -449,7 +519,8 @@ check ctx (StarCase z e x xs es) r =
 check ctx (Let x s e e') r = do
     (_, eUses) <- check ctx e s
     (e't, e'Uses) <- check (ctx ++ [(x, s)]) e' r
-    imposeUnionOrder e't eUses (PO.substAll (map fst (PO.toList eUses)) x e'Uses)
+    let all_e_vars = PO.toList eUses >>= \(a, b) -> [a, b]
+    imposeUnionOrder e't eUses (PO.substAll all_e_vars x e'Uses)
 
 check _ term _ = Left $ NotImplemented term
 
@@ -472,7 +543,7 @@ initialErrorCount = ErrorCount 0 0 0 0
 prop_check_term :: Gen (Either Error ())
 prop_check_term = do
   ty <- genTy
-  (term, (counter, ctx)) <- genTm ty [] 0
+  (term, (_, ctx, _)) <- genTm ty [] 0
   return $ case check ctx term ty of
     Right _  -> Right ()
     Left err -> Left err
