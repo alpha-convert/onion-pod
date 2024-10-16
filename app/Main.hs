@@ -96,11 +96,11 @@ genTy = sized go
                      , (1, return TyInt)]
 
 -- Create a fresh variable and return it.
-fresh :: StateT (Int, Ctx, PO.Pairs) Gen String
+fresh :: StateT (Int, Ctx) Gen String
 fresh = do
-    (n, ctx, pairs) <- get
+    (n, ctx) <- get
     let x = "x_" ++ show (n + 1)
-    put (n + 1, ctx, pairs)
+    put (n + 1, ctx)
     return x
 
 safeConcat :: Ctx -> Ctx -> Ctx
@@ -113,7 +113,6 @@ safeConcat ctx1 ctx2 =
     vars2 = map fst allBindings2
 
     duplicates = [x | x <- vars1, x `elem` vars2]
-
   in
     if null (duplicates)
     then ctx1 ++ ctx2
@@ -157,12 +156,33 @@ lookupByType (Pair var1 ty1 var2 ty2 : rest) targetTy
   | ty2 == targetTy = Just var2
   | otherwise = lookupByType rest targetTy
 
+lookupOrBind :: Ty -> StateT (Int, Ctx) Gen String
+lookupOrBind s = do
+  (_, ctx) <- get
+  case lookupByType ctx s of
+    Just x -> return x
+    Nothing -> do
+      x <- binding s
+      return x
+
+binding :: Ty -> StateT (Int, Ctx) Gen String
+binding s = do
+  x <- fresh
+  add (Atom x s)
+  return x
+
+add :: Binding -> StateT (Int, Ctx) Gen ()
+add el = do
+  (n, ctx) <- get
+  put (n, safeConcat ctx [el])
+
 genTm :: Ty -> Gen (Term, (Int, Ctx))
 genTm t = sized (\n -> runStateT (go t n) (0, []))
     where 
         go :: Ty -> Int -> StateT (Int, Ctx) Gen Term
         go TyEps _ = return EpsR
         go TyInt _ = IntR <$> lift arbitrary
+        go (TyPlus s t) 0 = undefined
         go _ _ = undefined
 
 data Error = TypeMismatch Ty Ty 
@@ -252,8 +272,7 @@ check ctx (StarCase z e x xs es) r =
         Just (TyStar s) -> do
             let ctx' = replaceElement' ctx z []
             check ctx' e s >>= \(_, eOrder) -> do
-                let pair = Pair x s xs (TyStar s)
-                let ctx'' = replaceElement' ctx z [pair]
+                let ctx'' = replaceElement' ctx z [Pair x s xs (TyStar s)]
                 check ctx'' es (TyStar s) >>= \(_, esOrder) ->
                     if PO.lessThan x xs esOrder
                         then imposeUnionOrder r eOrder esOrder
@@ -316,6 +335,5 @@ categorizeResult :: (Int, ErrorCount) -> Either Error () -> (Int, ErrorCount)
 categorizeResult (successes, counts) (Right _) = (successes + 1, counts)  -- Success
 categorizeResult (successes, counts) (Left err) = (successes, categorizeError err counts)  -- Failure with error
 
--- Main function to run the test
 main :: IO ()
 main = runAndReport
