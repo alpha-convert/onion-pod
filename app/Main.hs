@@ -384,13 +384,13 @@ check ctx (CatR e1 e2) st =
         _ -> Left $ TypeMismatch
 
 check ctx (CatL x y z e) st = 
-  lookup' ctx z >>= \(zt, _) -> 
+  lookup' ctx z >>= \(zt, zOrder) -> 
       case zt of 
           (TyCat s t) -> do
             let ctx' = replaceElement' ctx z [Pair x s y t]
             check ctx' e st >>= \(_, eOrder) ->
               if not (PO.greaterThan y x eOrder)
-                then return (st, eOrder)
+                then return (st, insert (x, y) eOrder) -- Not really necessary?
                 else Left $ OrderViolation
           _ -> Left $ TypeMismatch
 
@@ -426,7 +426,7 @@ check ctx (StarCase z e x xs es) r =
           check ctx'' es (TyStar s) >>= \(_, esOrder) ->
             if not (PO.greaterThan x xs esOrder)
               then
-                orderUnion r eOrder esOrder >>= \(_, combinedOrder) ->
+                orderUnion r eOrder (insert (x, xs) esOrder) >>= \(_, combinedOrder) ->
                   orderSequential r zOrder combinedOrder
               else
                 Left $ OrderViolation
