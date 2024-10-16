@@ -8,18 +8,17 @@ module PartialOrder (
     contains,    
     insert,         
     delete,        
-    lessThan,        
-    comparable,     
+    lessThan, 
+    greaterThan,           
     toList,                  
     transitiveClosure, 
     union,           
     (|>),          
-    concat',       
-    allInOrder,     
+    concat',  
     subst,         
     substAll,     
-    isAntisymmetric,
-    isDisjoint      
+    antisymmetric,
+    disjoint      
 ) where
 
 import qualified Data.Set as Set
@@ -40,34 +39,27 @@ type Pairs = Set.Set Pair
 empty :: Pairs
 empty = Set.empty
 
--- Singleton set with a pair
 singleton :: (String, String) -> Pairs
 singleton = Set.singleton . Pair
 
--- Check if a pair is in the set
 contains :: (String, String) -> Pairs -> Bool
 contains p = Set.member (Pair p)
 
--- Insert a pair into the set
 insert :: (String, String) -> Pairs -> Pairs
 insert p = Set.insert (Pair p)
 
--- Delete all pairs where either element matches the string `a`
 delete :: String -> Pairs -> Pairs
 delete a s = Set.foldr (\(Pair (b, c)) acc -> 
     if b == a || c == a 
     then acc
     else Set.insert (Pair (b, c)) acc) Set.empty s
 
--- Check if a < b (i.e., (a, b) exists in the set)
 lessThan :: String -> String -> Pairs -> Bool
 lessThan a b s = Set.member (Pair (a, b)) s
 
--- Check if a and b are comparable (i.e., (a, b) or (b, a) exists)
-comparable :: String -> String -> Pairs -> Bool
-comparable a b s = lessThan a b s || lessThan b a s
+greaterThan :: String -> String -> Pairs -> Bool
+greaterThan a b s = Set.member (Pair (b, a)) s
 
--- Convert the set of pairs to a list
 toList :: Pairs -> [(String, String)]
 toList = map (\(Pair p) -> p) . Set.toList
 
@@ -90,10 +82,6 @@ concat' s1 s2 =
       newPairs = Set.fromList [Pair (a, b) | Pair (a, _) <- Set.toList s1, Pair (_, b) <- Set.toList s2]
   in transitiveClosure (Set.union s12 newPairs)
 
-allInOrder :: [String] -> Pairs
-allInOrder [] = Set.empty
-allInOrder (h:t) = concat' (singleton (h, h)) (allInOrder t)
-
 subst :: String -> String -> Pairs -> Pairs
 subst x y s = Set.foldr (\(Pair (a, b)) acc -> 
     let a' = if a == y then x else a
@@ -109,14 +97,14 @@ substAll xs y s = Set.foldr (\(Pair (a, b)) acc ->
         in Set.insert (Pair (a', b')) acc') acc xs) Set.empty s
     |> transitiveClosure
 
-isAntisymmetric :: Pairs -> Maybe (String, String)
-isAntisymmetric s = Set.foldr (\(Pair (a, b)) acc -> 
+antisymmetric :: Pairs -> Maybe (String, String)
+antisymmetric s = Set.foldr (\(Pair (a, b)) acc -> 
     case acc of
       Nothing -> if a /= b && lessThan b a s then Just (b, a) else Nothing
       result -> result) Nothing s
 
-isDisjoint :: Pairs -> Pairs -> Maybe (String, String)
-isDisjoint s1 s2 = Set.foldr (\(Pair (a, b)) acc -> 
+disjoint :: Pairs -> Pairs -> Maybe (String, String)
+disjoint s1 s2 = Set.foldr (\(Pair (a, b)) acc -> 
     case acc of
       Nothing -> if a /= b then Just (a, b) else Nothing
       result -> result) Nothing (Set.intersection s1 s2)

@@ -278,40 +278,7 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
               z <- fresh
               replaceElement [Atom z (TyPlus s t)] y
               return $ PlusCase z x e1 y e2
-          2 -> do                                             
-              z <- fresh
-              s <- lift genTy
-              t <- lift genTy
-              x <- fresh
-              y <- fresh
-
-              splitAndInsert [Pair x s y t]
-
-              e <- go r (n `div` 2)
-
-              replaceElement [Atom z (TyCat s t)] x
-
-              return $ CatL x y z e
-          3 -> do                                           
-              z <- fresh
-              s <- lift genTy
-
-              e <- go s (n `div` 2)
-
-              splitAndInsert [Atom z (TyStar s)]
-
-              x <- fresh
-              xs <- fresh
-
-              replaceElement [Pair x s xs (TyStar s)] z
-
-              es <- go (TyStar s) (n `div` 2)
-
-              replaceElement [Atom z (TyStar s)] x
-              replaceElement [] xs
-
-              return $ StarCase z e x xs es
-          4 -> do                  
+          2 -> do                  
               x <- fresh
               s <- lift genTy
 
@@ -332,6 +299,38 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
               replaceElement delta' x
 
               return $ Let x s e e'
+          3 -> do                                             
+              z <- fresh
+              s <- lift genTy
+              t <- lift genTy
+              x <- fresh
+              y <- fresh
+
+              splitAndInsert [Pair x s y t]
+
+              e <- go r (n `div` 2)
+
+              replaceElement [Atom z (TyCat s t)] x
+
+              return $ CatL x y z e
+          4 -> do                                           
+              z <- fresh
+              s <- lift genTy
+
+              e <- go s (n `div` 2)
+
+              splitAndInsert [Atom z (TyStar s)]
+
+              x <- fresh
+              xs <- fresh
+
+              replaceElement [Pair x s xs (TyStar s)] z
+
+              es <- go (TyStar s) (n `div` 2)
+
+              replaceElement [Atom z (TyStar s)] x
+
+              return $ StarCase z e x xs es
           _ -> error "Shouldn't be possible..."
 
 data Error = TypeMismatch Ty Ty 
@@ -348,14 +347,14 @@ matchType expected (actual, order)
 orderSequential :: Ty -> PO.Pairs -> PO.Pairs -> Either Error (Ty, PO.Pairs)
 orderSequential ty path1 path2 = 
   let path' = PO.concat' path1 path2
-  in case PO.isAntisymmetric path' of
+  in case PO.antisymmetric path' of
        Just _ -> Left OrderViolation
        Nothing -> Right (ty, path') 
 
 orderUnion :: Ty -> PO.Pairs -> PO.Pairs -> Either Error (Ty, PO.Pairs)
 orderUnion ty path1 path2 =
   let path' = PO.union path1 path2
-  in case PO.isAntisymmetric path' of
+  in case PO.antisymmetric path' of
        Just _ -> Left OrderViolation
        Nothing -> Right (ty, path')
 
@@ -391,9 +390,9 @@ check ctx (CatL x y z e) r =
         Just (TyCat s t) -> do
             let ctx' = replaceElement' ctx z [Pair x s y t]
             check ctx' e r >>= \(_, eOrder) ->
-                if PO.lessThan x y eOrder
-                then return (r, eOrder)
-                else Left OrderViolation
+                if PO.greaterThan y x eOrder
+                then Left OrderViolation
+                else return (r, eOrder)
         _ -> Left $ LookupFailed z
 
 check ctx (InL e) st =
@@ -423,9 +422,9 @@ check ctx (StarCase z e x xs es) r =
             check ctx' e s >>= \(_, eOrder) -> do
                 let ctx'' = replaceElement' ctx z [Pair x s xs (TyStar s)]
                 check ctx'' es (TyStar s) >>= \(_, esOrder) ->
-                    if PO.lessThan x xs esOrder
-                        then orderUnion r eOrder esOrder
-                        else Left OrderViolation
+                    if PO.greaterThan xs x esOrder
+                        then Left OrderViolation
+                        else orderUnion r eOrder esOrder
         _ -> Left $ LookupFailed z
 
 check ctx (Let x s e e') r = do
