@@ -8,13 +8,15 @@ module PartialOrder (
     contains,    
     insert,         
     delete,        
-    lessThan, 
-    greaterThan,           
+    lessThan,    
+    greaterThan,    
+    comparable,     
     toList,                  
     transitiveClosure, 
     union,           
     (|>),          
-    concat',  
+    concat',       
+    allInOrder,     
     subst,         
     substAll,     
     antisymmetric,
@@ -39,27 +41,37 @@ type Pairs = Set.Set Pair
 empty :: Pairs
 empty = Set.empty
 
+-- Singleton set with a pair
 singleton :: (String, String) -> Pairs
 singleton = Set.singleton . Pair
 
+-- Check if a pair is in the set
 contains :: (String, String) -> Pairs -> Bool
 contains p = Set.member (Pair p)
 
+-- Insert a pair into the set
 insert :: (String, String) -> Pairs -> Pairs
 insert p = Set.insert (Pair p)
 
+-- Delete all pairs where either element matches the string `a`
 delete :: String -> Pairs -> Pairs
 delete a s = Set.foldr (\(Pair (b, c)) acc -> 
     if b == a || c == a 
     then acc
     else Set.insert (Pair (b, c)) acc) Set.empty s
 
+-- Check if a < b (i.e., (a, b) exists in the set)
 lessThan :: String -> String -> Pairs -> Bool
 lessThan a b s = Set.member (Pair (a, b)) s
 
 greaterThan :: String -> String -> Pairs -> Bool
-greaterThan a b s = Set.member (Pair (b, a)) s
+greaterThan b a s = Set.member (Pair (b, a)) s
 
+-- Check if a and b are comparable (i.e., (a, b) or (b, a) exists)
+comparable :: String -> String -> Pairs -> Bool
+comparable a b s = lessThan a b s || lessThan b a s
+
+-- Convert the set of pairs to a list
 toList :: Pairs -> [(String, String)]
 toList = map (\(Pair p) -> p) . Set.toList
 
@@ -81,6 +93,10 @@ concat' s1 s2 =
   let s12 = union s1 s2
       newPairs = Set.fromList [Pair (a, b) | Pair (a, _) <- Set.toList s1, Pair (_, b) <- Set.toList s2]
   in transitiveClosure (Set.union s12 newPairs)
+
+allInOrder :: [String] -> Pairs
+allInOrder [] = Set.empty
+allInOrder (h:t) = concat' (singleton (h, h)) (allInOrder t)
 
 subst :: String -> String -> Pairs -> Pairs
 subst x y s = Set.foldr (\(Pair (a, b)) acc -> 

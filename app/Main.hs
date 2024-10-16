@@ -136,14 +136,14 @@ matches :: String -> Binding -> Bool
 matches x (Atom var _) = var == x
 matches x (Pair var1 _ var2 _) = var1 == x || var2 == x
 
-lookup' :: Ctx -> String -> Maybe Ty
-lookup' [] _ = Nothing
+lookup' :: Ctx -> String -> Either Error (Ty, PO.Pairs)
+lookup' [] x = Left $ LookupFailed x
 lookup' (Atom k v : rest) x
-    | k == x = Just v
+    | k == x = Right (v, PO.singleton (x, x))  -- Found variable, return type and PO with (x, x)
     | otherwise = lookup' rest x
 lookup' (Pair k1 v1 k2 v2 : rest) x
-    | k1 == x = Just v1
-    | k2 == x = Just v2
+    | k1 == x = Right (v1, PO.singleton (k1, k1))  -- First variable in pair found
+    | k2 == x = Right (v2, PO.singleton (k2, k2))  -- Second variable in pair found
     | otherwise = lookup' rest x
 
 lookupByType :: Ctx -> Ty -> Maybe String
@@ -333,7 +333,7 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
               return $ StarCase z e x xs es
           _ -> error "Shouldn't be possible..."
 
-data Error = TypeMismatch Ty Ty 
+data Error = TypeMismatch
            | OrderViolation 
            | NotImplemented Term 
            | LookupFailed String
@@ -342,7 +342,7 @@ data Error = TypeMismatch Ty Ty
 matchType :: Ty -> (Ty, PO.Pairs) -> Either Error (Ty, PO.Pairs)
 matchType expected (actual, order)
     | actual == expected = Right (actual, order)
-    | otherwise = Left $ TypeMismatch actual expected
+    | otherwise = Left $ TypeMismatch
 
 orderSequential :: Ty -> PO.Pairs -> PO.Pairs -> Either Error (Ty, PO.Pairs)
 orderSequential ty path1 path2 = 
@@ -364,10 +364,8 @@ check _ (IntR _) s = matchType s (TyInt, PO.empty)
 check _ (Nil t) s = matchType s (t, PO.empty)
 
 check ctx (Var x s) s' = do
-    matchType s' (s, PO.empty) >>= \(_, po) ->
-        case lookup' ctx x of
-            Just s'' -> matchType s'' (s, po)
-            Nothing  -> Left $ LookupFailed x
+    matchType s' (s, PO.empty) >>= \(_, _) ->
+      lookup' ctx x >>= \(s'', po') -> matchType s'' (s, po')
 
 check ctx (Cons eh et) ss = 
     case ss of
@@ -375,7 +373,7 @@ check ctx (Cons eh et) ss =
             check ctx eh s >>= \(_, hOrder) ->
                 check ctx et (TyStar s) >>= \(_, tOrder) ->
                     orderSequential ss hOrder tOrder
-        _ -> Left $ TypeMismatch ss (TyStar undefined)
+        _ -> Left $ TypeMismatch
 
 check ctx (CatR e1 e2) st =
     case st of
@@ -383,49 +381,55 @@ check ctx (CatR e1 e2) st =
             check ctx e1 s >>= \(_, e1Order) ->
                 check ctx e2 t >>= \(_, e2Order) ->
                     orderSequential st e1Order e2Order
-        _ -> Left $ TypeMismatch st (TyCat undefined undefined)
+        _ -> Left $ TypeMismatch
 
-check ctx (CatL x y z e) r =
-    case lookup' ctx z of
-        Just (TyCat s t) -> do
+check ctx (CatL x y z e) st = 
+  lookup' ctx z >>= \(zt, zOrder) -> 
+      case zt of 
+          (TyCat s t) -> do
             let ctx' = replaceElement' ctx z [Pair x s y t]
-            check ctx' e r >>= \(_, eOrder) ->
-                if PO.greaterThan y x eOrder
-                then Left OrderViolation
-                else return (r, eOrder)
-        _ -> Left $ LookupFailed z
+            check ctx' e st >>= \(_, eOrder) ->
+              if PO.lessThan x y eOrder
+                then Left OrderViolation 
+                else return (st, eOrder) 
+          _ -> Left $ TypeMismatch
 
 check ctx (InL e) st =
     case st of 
         (TyPlus s _) -> check ctx e s
-        _ -> Left $ TypeMismatch st (TyPlus undefined undefined)
+        _ -> Left $ TypeMismatch
 
 check ctx (InR e) st =
     case st of 
         (TyPlus _ t) -> check ctx e t
-        _ -> Left $ TypeMismatch st (TyPlus undefined undefined)
+        _ -> Left $ TypeMismatch
 
 check ctx (PlusCase z x e1 y e2) r =
-    case lookup' ctx z of
-        Just (TyPlus s t) -> do
+    lookup' ctx z >>= \(zt, zOrder) -> 
+      case zt of
+        (TyPlus s t) -> do
             let ctx' = replaceElement' ctx z [Atom x s]
             check ctx' e1 r >>= \(_, e1Order) -> do
-                let ctx'' = replaceElement' ctx z [Atom y t]
-                check ctx'' e2 r >>= \(_, e2Order) ->
-                    orderUnion r e1Order e2Order
-        _ -> Left $ LookupFailed z
+              let ctx'' = replaceElement' ctx' z [Atom y t]
+              check ctx'' e2 r >>= \(_, e2Order) ->
+                orderUnion r e1Order e2Order >>= \(_, eOrders) ->
+                orderSequential r zOrder eOrders
+        _ -> Left $ TypeMismatch
 
 check ctx (StarCase z e x xs es) r =
-    case lookup' ctx z of
-        Just (TyStar s) -> do
-            let ctx' = replaceElement' ctx z []
-            check ctx' e s >>= \(_, eOrder) -> do
-                let ctx'' = replaceElement' ctx z [Pair x s xs (TyStar s)]
-                check ctx'' es (TyStar s) >>= \(_, esOrder) ->
-                    if PO.greaterThan xs x esOrder
-                        then Left OrderViolation
-                        else orderUnion r eOrder esOrder
-        _ -> Left $ LookupFailed z
+  lookup' ctx z >>= \(zt, zOrder) ->
+    case zt of
+      (TyStar s) -> do
+        let ctx' = replaceElement' ctx z []
+        check ctx' e s >>= \(_, eOrder) -> do
+          let ctx'' = replaceElement' ctx z [Pair x s xs (TyStar s)]
+          check ctx'' es (TyStar s) >>= \(_, esOrder) ->
+            if PO.greaterThan x xs esOrder
+              then Left OrderViolation
+              else
+                orderUnion r eOrder esOrder >>= \(_, combinedOrder) ->
+                  orderSequential r zOrder combinedOrder
+      _ -> Left $ TypeMismatch
 
 check ctx (Let x s e e') r = do
     (_, eUses) <- check ctx e s
@@ -443,7 +447,7 @@ data ErrorCount = ErrorCount {
 } deriving (Show)
 
 categorizeError :: Error -> ErrorCount -> ErrorCount
-categorizeError (TypeMismatch _ _) counts = counts { typeMismatches = typeMismatches counts + 1 }
+categorizeError (TypeMismatch) counts = counts { typeMismatches = typeMismatches counts + 1 }
 categorizeError OrderViolation counts     = counts { orderViolations = orderViolations counts + 1 }
 categorizeError (LookupFailed _) counts   = counts { lookupFailures = lookupFailures counts + 1 }
 categorizeError (NotImplemented _) counts = counts { notImplemented = notImplemented counts + 1 }
@@ -451,19 +455,19 @@ categorizeError (NotImplemented _) counts = counts { notImplemented = notImpleme
 initialErrorCount :: ErrorCount
 initialErrorCount = ErrorCount 0 0 0 0
 
-prop_check_term :: Gen (Either Error ())
+prop_check_term :: Gen (Either Error (PO.Pairs, (Ty, PO.Pairs)))
 prop_check_term = do
   ty <- genTy
   (term, (_, ctx)) <- genTm ty
   return $ case check ctx term ty of
-    Right _  -> Right ()
-    Left err -> Left err
+    Right (ty, pairs) -> Right (pairs, (ty, pairs))  -- Replace `PO.empty` with actual PO data
+    Left err     -> Left err
 
 runAndReport :: IO ()
 runAndReport = do
   results <- generate (replicateM 100 prop_check_term)
 
-  let (successes, errorCounts) = foldl categorizeResult (0, initialErrorCount) results
+  let (successes, errorCounts, orders) = foldl categorizeResult (0, initialErrorCount, []) results
 
   let numFailed = 100 - successes
 
@@ -479,9 +483,14 @@ runAndReport = do
   putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
   putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
 
-categorizeResult :: (Int, ErrorCount) -> Either Error () -> (Int, ErrorCount)
-categorizeResult (successes, counts) (Right _) = (successes + 1, counts)  -- Success
-categorizeResult (successes, counts) (Left err) = (successes, categorizeError err counts)  -- Failure with error
+  putStrLn "\nPartial Orders from Successful Type Checks:"
+  mapM_ (putStrLn . show) orders
+
+categorizeResult :: (Int, ErrorCount, [PO.Pairs]) -> Either Error (PO.Pairs, (Ty, PO.Pairs)) -> (Int, ErrorCount, [PO.Pairs])
+categorizeResult (successes, counts, orders) (Right (po, _)) =
+  (successes + 1, counts, po : orders)  -- Collect partial orders
+categorizeResult (successes, counts, orders) (Left err) =
+  (successes, categorizeError err counts, orders)  -- Failure with error
 
 main :: IO ()
 main = runAndReport
