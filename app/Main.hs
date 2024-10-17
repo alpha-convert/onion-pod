@@ -20,9 +20,7 @@ import Control.Monad (replicateM)
 import Language.Haskell.TH.Syntax
 
 data Binding = Atom String Ty | Pair String Ty String Ty
-data Ty = TyEps | TyInt | TyCat Ty Ty | TyPlus Ty Ty | TyStar Ty deriving (Eq,Ord,Show,Lift)
-
--- Hole deriving (Eq,Ord,Show,Lift)
+data Ty = TyEps | TyInt | TyCat Ty Ty | TyPlus Ty Ty | TyStar Ty | Hole deriving (Eq,Ord,Show,Lift)
 type Ctx = [Binding]
 
 extractBindings :: Ctx -> [(String, Ty)]
@@ -93,20 +91,12 @@ data Term where
 genTy :: Gen Ty
 genTy = sized go
   where
-    go n = frequency [ (2, TyCat <$> go' (n `div` 2) <*> go' (n `div` 2))
-                     , (2, TyPlus <$> go' (n `div` 2) <*> go' (n `div` 2))
-                     , (2, TyStar <$> go' (n `div` 2))
+    go 0 = frequency [(1, return TyEps), (1, return TyInt), (1, return Hole)]
+    go n = frequency [ (2, TyCat <$> go (n `div` 2) <*> go (n `div` 2))
+                     , (2, TyPlus <$> go (n `div` 2) <*> go (n `div` 2))
+                     , (2, TyStar <$> go (n `div` 2))
                      , (1, return TyEps)
                      , (1, return TyInt)]
-    go' 0 = frequency [(1, return TyEps), (1, return TyInt)] -- (15, return Hole)
-    go' n = frequency [
-        -- (1, return Hole)
-      (1, return TyEps)
-      , (1, return TyInt)
-      , (4, TyCat <$> go' (n `div` 2) <*> go' (n `div` 2))
-      , (4, TyPlus <$> go' (n `div` 2) <*> go' (n `div` 2))
-      , (4, TyStar <$> go' (n `div` 2))
-      ]
 
 genTyConcrete :: Gen Ty
 genTyConcrete = sized go
@@ -212,9 +202,6 @@ split = do
   let ctx1 = drop n ctx
   return (ctx0, ctx1)
 
-chooseVar :: StateT (Int, Ctx) Gen (String, Ty)
-chooseVar = undefined
-
 splitAndInsert :: Ctx -> StateT (Int, Ctx) Gen ()
 splitAndInsert ctx = do
   (ctx0, ctx1) <- split
@@ -268,6 +255,23 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
         (other, _) <- go' (TyStar s) n
         choice <- ST.lift $ oneof [return nil, return lst, return other]
         return (choice, TyStar s)
+      go Hole 0 = do
+        (_, ctx) <- get
+        let ctxList = extractBindings ctx
+        if null(ctxList)
+          then do
+            x <- fresh
+            s <- ST.lift genTyConcrete
+            add (Atom x s)
+            return $ (Var x s, s)
+          else do
+            n <- ST.lift $ choose (0, length ctxList - 1)  -- Choose a valid index
+            let (x, s) = ctxList !! n
+            return (Var x s, s)
+      go Hole n = do
+        s <- ST.lift genTyConcrete
+        e <- go' s (n `div` 2)
+        return e
       go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
       go' r 0 = do
         x <- lookupOrBind r
@@ -280,8 +284,8 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
               return (Var x r, r)
           1 -> do
               x <- fresh
-              s <- ST.lift genTy
-              t <- ST.lift genTy 
+              s <- ST.lift genTyConcrete
+              t <- ST.lift genTyConcrete
 
               splitAndInsert [Atom x s]
               (e1, _) <- go r (n `div` 2)
@@ -293,10 +297,10 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
             
               z <- fresh
               replaceElement [Atom z (TyPlus s t)] y
-              return (PlusCase z x e1 y e2, TyPlus s t)
+              return (PlusCase z x e1 y e2, r)
           2 -> do                  
               x <- fresh
-              s <- ST.lift genTy
+              s <- ST.lift genTyConcrete
 
               (gamma', temp) <- split
               replace temp
@@ -317,8 +321,8 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
               return (Let x s e e', r)
           3 -> do                                             
               z <- fresh
-              s <- ST.lift genTy
-              t <- ST.lift genTy
+              s <- ST.lift genTyConcrete
+              t <- ST.lift genTyConcrete
               x <- fresh
               y <- fresh
 
@@ -328,10 +332,10 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
 
               replaceElement [Atom z (TyCat s t)] x
 
-              return (CatL x y z e, TyCat s t)
+              return (CatL x y z e, r)
           4 -> do                                           
               z <- fresh
-              s <- ST.lift genTy
+              s <- ST.lift genTyConcrete
 
               (e, _) <- go s (n `div` 2)
 
@@ -346,14 +350,14 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
 
               replaceElement [Atom z (TyStar s)] x
 
-              return (StarCase z e x xs es, TyStar s)
+              return (StarCase z e x xs es, r)
           _ -> error "Shouldn't be possible..."
 
 data Error = TypeMismatch
            | OrderViolation 
            | NotImplemented Term 
            | LookupFailed String
-           | UnfilledHole Term
+           | UnfilledHole
            deriving (Show, Eq)
 
 matchType :: Ty -> (Ty, PO.Pairs) -> Either Error (Ty, PO.Pairs)
@@ -375,16 +379,27 @@ orderUnion ty path1 path2 =
        Just _ -> Left OrderViolation
        Nothing -> Right (ty, path')
 
+checkForHoles :: Ty -> Either Error ()
+checkForHoles Hole = Left $ UnfilledHole
+checkForHoles (TyCat s t) = checkForHoles s >> checkForHoles t
+checkForHoles (TyPlus s t) = checkForHoles s >> checkForHoles t
+checkForHoles (TyStar s) = checkForHoles s
+checkForHoles _ = return ()
+
 check :: Ctx -> Term -> Ty -> Either Error (Ty, PO.Pairs)
-check _ (EpsR) s = matchType s (TyEps, PO.empty)
-check _ (IntR _) s = matchType s (TyInt, PO.empty)
-check _ (Nil t) s = matchType s (t, PO.empty)
+check _ _ Hole = Left $ UnfilledHole
+check _ (EpsR) s = checkForHoles s >> matchType s (TyEps, PO.empty)
+check _ (IntR _) s = checkForHoles s >> matchType s (TyInt, PO.empty)
+check _ (Nil t) s = checkForHoles s >> matchType s (t, PO.empty)
 
 check ctx (Var x s) s' = do
+    checkForHoles s
+    checkForHoles s'
     matchType s' (s, PO.empty) >>= \(_, _) ->
       lookup' ctx x >>= \(s'', po') -> matchType s'' (s, po')
 
 check ctx (Cons eh et) ss = 
+    checkForHoles ss >>
     case ss of
         (TyStar s) -> do
             check ctx eh s >>= \(_, hOrder) ->
@@ -393,6 +408,7 @@ check ctx (Cons eh et) ss =
         _ -> Left $ TypeMismatch
 
 check ctx (CatR e1 e2) st =
+    checkForHoles st >>
     case st of
         (TyCat s t) -> do
             check ctx e1 s >>= \(_, e1Order) ->
@@ -401,6 +417,7 @@ check ctx (CatR e1 e2) st =
         _ -> Left $ TypeMismatch
 
 check ctx (CatL x y z e) st = 
+  checkForHoles st >>
   lookup' ctx z >>= \(zt, zOrder) -> 
       case zt of 
           (TyCat s t) -> do
@@ -412,16 +429,19 @@ check ctx (CatL x y z e) st =
           _ -> Left $ TypeMismatch
 
 check ctx (InL e) st =
+    checkForHoles st >>
     case st of 
         (TyPlus s _) -> check ctx e s
         _ -> Left $ TypeMismatch
 
 check ctx (InR e) st =
+    checkForHoles st >>
     case st of 
         (TyPlus _ t) -> check ctx e t
         _ -> Left $ TypeMismatch
 
 check ctx (PlusCase z x e1 y e2) r =
+    checkForHoles r >>
     lookup' ctx z >>= \(zt, zOrder) -> 
       case zt of
         (TyPlus s t) -> do
@@ -434,6 +454,7 @@ check ctx (PlusCase z x e1 y e2) r =
         _ -> Left $ TypeMismatch
 
 check ctx (StarCase z e x xs es) r =
+  checkForHoles r >>
   lookup' ctx z >>= \(zt, zOrder) ->
     case zt of
       (TyStar s) -> do
@@ -450,12 +471,12 @@ check ctx (StarCase z e x xs es) r =
       _ -> Left $ TypeMismatch
 
 check ctx (Let x s e e') r = do
+    checkForHoles r
+    checkForHoles s
     (_, eUses) <- check ctx e s
     (e't, e'Uses) <- check (safeConcat ctx [(Atom x s)]) e' r
     let all_e_vars = PO.toList eUses >>= \(a, b) -> [a, b]
     orderUnion e't eUses (PO.substAll all_e_vars x e'Uses)
-
--- check _ tm Hole = Left $ UnfilledHole tm
 
 check _ term _ = Left $ NotImplemented term
 
@@ -472,31 +493,35 @@ categorizeError (TypeMismatch) counts = counts { typeMismatches = typeMismatches
 categorizeError OrderViolation counts     = counts { orderViolations = orderViolations counts + 1 }
 categorizeError (LookupFailed _) counts   = counts { lookupFailures = lookupFailures counts + 1 }
 categorizeError (NotImplemented _) counts = counts { notImplemented = notImplemented counts + 1 }
-categorizeError (UnfilledHole _) counts = counts { hole = hole counts + 1 }
+categorizeError UnfilledHole counts = counts { hole = hole counts + 1 }
 
 initialErrorCount :: ErrorCount
 initialErrorCount = ErrorCount 0 0 0 0 0
 
-prop_check_term :: Gen (Either Error (PO.Pairs, (Ty, PO.Pairs)))
+prop_check_term :: Gen (Either (Error, Term, Ty, Ty) (PO.Pairs, Term, Ty, Ty))
 prop_check_term = do
-  ty <- genTy
-  ((term, ty'), (_, ctx)) <- genTm ty
-  return $ case check ctx term ty' of
-    Right (ty', pairs) -> Right (pairs, (ty', pairs))
-    Left err     -> Left err
+  originalTy <- genTy
+  ((term, inferredTy), (_, ctx)) <- genTm originalTy
+  return $ case check ctx term inferredTy of
+    Right (ty', pairs) -> Right (pairs, term, originalTy, inferredTy)
+    Left err           -> Left (err, term, originalTy, inferredTy)
 
 runAndReport :: IO ()
 runAndReport = do
   results <- generate (replicateM 1000 prop_check_term)
 
-  let (successes, errorCounts, orders) = foldl categorizeResult (0, initialErrorCount, []) results
+  let (successes, errorCounts, successesList, failuresList) = 
+        foldl categorizeResult (0, initialErrorCount, [], []) results
 
   let numFailed = 1000 - successes
 
-  putStrLn "\nPartial Orders from Successful Type Checks:"
-  mapM_ (putStrLn . show) orders
+  putStrLn "\nGenerated Terms and Their Types (Successful Checks):"
+  mapM_ printTermAndTypes successesList
 
-  putStrLn $ "Total terms generated: " ++ show 1000
+  putStrLn "\nFailed Terms and Their Errors:"
+  mapM_ printFailedTermAndError failuresList
+
+  putStrLn $ "\nTotal terms generated: " ++ show 1000
   putStrLn $ "Successful type checks: " ++ show successes
   putStrLn $ "Failed type checks: " ++ show numFailed
   putStrLn $ "Success rate: " ++ show (fromIntegral successes / 1000 * 100) ++ "%"
@@ -507,13 +532,32 @@ runAndReport = do
   putStrLn $ "Type Mismatches: " ++ show (typeMismatches errorCounts)
   putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
   putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
-  putStrLn $ "Hole Errors: " ++ show (notImplemented errorCounts)
+  putStrLn $ "Hole Errors: " ++ show (hole errorCounts)
 
-categorizeResult :: (Int, ErrorCount, [PO.Pairs]) -> Either Error (PO.Pairs, (Ty, PO.Pairs)) -> (Int, ErrorCount, [PO.Pairs])
-categorizeResult (successes, counts, orders) (Right (po, _)) =
-  (successes + 1, counts, po : orders)
-categorizeResult (successes, counts, orders) (Left err) =
-  (successes, categorizeError err counts, orders)
+printTermAndTypes :: (PO.Pairs, Term, Ty, Ty) -> IO ()
+printTermAndTypes (po, term, originalTy, inferredTy) = do
+  putStrLn "----------------------------"
+  putStrLn $ "Original Type (with holes): " ++ show originalTy
+  putStrLn $ "Generated Term: " ++ show term
+  putStrLn $ "Inferred Type: " ++ show inferredTy
+  putStrLn "Partial Order: "
+  print po
+
+printFailedTermAndError :: (Error, Term, Ty, Ty) -> IO ()
+printFailedTermAndError (err, term, originalTy, inferredTy) = do
+  putStrLn "----------------------------"
+  putStrLn $ "Original Type (with holes): " ++ show originalTy
+  putStrLn $ "Generated Term: " ++ show term
+  putStrLn $ "Inferred Type: " ++ show inferredTy
+  putStrLn $ "Error: " ++ show err
+
+categorizeResult :: (Int, ErrorCount, [(PO.Pairs, Term, Ty, Ty)], [(Error, Term, Ty, Ty)]) 
+                 -> Either (Error, Term, Ty, Ty) (PO.Pairs, Term, Ty, Ty) 
+                 -> (Int, ErrorCount, [(PO.Pairs, Term, Ty, Ty)], [(Error, Term, Ty, Ty)])
+categorizeResult (successes, counts, successesList, failuresList) (Right (po, term, originalTy, inferredTy)) =
+  (successes + 1, counts, (po, term, originalTy, inferredTy) : successesList, failuresList)
+categorizeResult (successes, counts, successesList, failuresList) (Left (err, term, originalTy, inferredTy)) =
+  (successes, categorizeError err counts, successesList, (err, term, originalTy, inferredTy) : failuresList)
 
 main :: IO ()
 main = runAndReport
