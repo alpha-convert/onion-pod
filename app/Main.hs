@@ -204,53 +204,41 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
         x <- lookupOrBind (TyPlus s t)
         return $ Var x (TyPlus s t)
       go (TyPlus s t) n = do
-        choice <- lift $ elements [True, False]
-        if choice
-          then do
-            choice' <- lift $ elements [True, False]
-            if choice'
-              then InL <$> go s (n `div` 2)
-              else InR <$> go t (n `div` 2)
-          else
-            go' (TyPlus s t) n
+        l <- InL <$> go s (n `div` 2)
+        r <- InR <$> go t (n `div` 2)
+        other <- go' (TyPlus s t) n
+        lift $ oneof [return l, return r, return other]
       go (TyCat s t) 0 = do
         x <- lookupOrBind (TyCat s t)
         return $ Var x (TyCat s t)
       go (TyCat s t) n = do
-        choice <- lift $ elements [True, False]
-        if choice 
-          then do
+        catr <- do
+          (gamma, delta) <- split
+          replace gamma
+          e1 <- go s (n `div` 2)
+          (_, gamma') <- get
+          replace delta
+          e2 <- go t (n `div` 2)
+          (_, delta') <- get
+          replace (safeConcat gamma' delta')
+          return $ CatR e1 e2
+        other <- go' (TyCat s t) n
+        lift $ oneof [return catr, return other]
+      go (TyStar s) 0 = return $ Nil (TyStar s)
+      go (TyStar s) n = do
+        nil <- return $ Nil (TyStar s)
+        lst <- do                                                                    
             (gamma, delta) <- split
             replace gamma
             e1 <- go s (n `div` 2)
             (_, gamma') <- get
             replace delta
-            e2 <- go t (n `div` 2)
+            e2 <- go (TyStar s) (n `div` 2)
             (_, delta') <- get
-            replace (safeConcat gamma' delta')
-            return $ CatR e1 e2
-          else
-            go' (TyCat s t) n
-      go (TyStar s) 0 = return $ Nil (TyStar s)
-      go (TyStar s) n = do
-        choice <- lift $ elements [True, False]
-        if choice
-          then do
-              choice' <- lift $ elements [True, False]
-              if choice'
-                  then return $ Nil (TyStar s)
-                  else do                                                                    
-                      (gamma, delta) <- split
-                      replace gamma
-                      e1 <- go s (n `div` 2)
-                      (_, gamma') <- get
-                      replace delta
-                      e2 <- go (TyStar s) (n `div` 2)
-                      (_, delta') <- get
-                      replace (gamma' ++ delta')
-                      return $ Cons e1 e2
-          else
-              go' (TyStar s) n
+            replace (gamma' ++ delta')
+            return $ Cons e1 e2
+        other <- go' (TyStar s) n
+        lift $ oneof [return nil, return lst, return other]
       go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
       go' r 0 = do
         x <- lookupOrBind r
