@@ -1,14 +1,14 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveLift #-}
 
 module Main where
 
 import Data.Maybe (mapMaybe)
-import Types
 import Test.QuickCheck
 import ElimTerm
 import Events
 import Data.Foldable (toList)
-import Control.Monad.State
+import Control.Monad.State as ST
 import Control.Monad (when)
 import Data.List (nub, (\\))
 import Test.Hspec.QuickCheck
@@ -17,8 +17,12 @@ import Data.List (elemIndex)
 import PartialOrder as PO
 import Data.Set (Set)
 import Control.Monad (replicateM)
+import Language.Haskell.TH.Syntax
 
 data Binding = Atom String Ty | Pair String Ty String Ty
+data Ty = TyEps | TyInt | TyCat Ty Ty | TyPlus Ty Ty | TyStar Ty deriving (Eq,Ord,Show,Lift)
+
+-- Hole deriving (Eq,Ord,Show,Lift)
 type Ctx = [Binding]
 
 extractBindings :: Ctx -> [(String, Ty)]
@@ -85,10 +89,29 @@ data Term where
     Rec :: Term
     deriving (Eq,Ord,Show)
 
+-- Top-level is always not a hole.
 genTy :: Gen Ty
 genTy = sized go
   where
-    go 0 = frequency [(1, return TyEps), (5, return TyInt)]
+    go n = frequency [ (2, TyCat <$> go' (n `div` 2) <*> go' (n `div` 2))
+                     , (2, TyPlus <$> go' (n `div` 2) <*> go' (n `div` 2))
+                     , (2, TyStar <$> go' (n `div` 2))
+                     , (1, return TyEps)
+                     , (1, return TyInt)]
+    go' 0 = frequency [(1, return TyEps), (1, return TyInt)] -- (15, return Hole)
+    go' n = frequency [
+        -- (1, return Hole)
+      (1, return TyEps)
+      , (1, return TyInt)
+      , (4, TyCat <$> go' (n `div` 2) <*> go' (n `div` 2))
+      , (4, TyPlus <$> go' (n `div` 2) <*> go' (n `div` 2))
+      , (4, TyStar <$> go' (n `div` 2))
+      ]
+
+genTyConcrete :: Gen Ty
+genTyConcrete = sized go
+  where
+    go 0 = frequency [(1, return TyEps), (1, return TyInt)]
     go n = frequency [ (2, TyCat <$> go (n `div` 2) <*> go (n `div` 2))
                      , (2, TyPlus <$> go (n `div` 2) <*> go (n `div` 2))
                      , (2, TyStar <$> go (n `div` 2))
@@ -184,128 +207,133 @@ add el = do
 split :: StateT (Int, Ctx) Gen (Ctx, Ctx)
 split = do
   (_, ctx) <- get
-  n <- lift $ choose (0, length ctx)
+  n <- ST.lift $ choose (0, length ctx)
   let ctx0 = take n ctx
   let ctx1 = drop n ctx
   return (ctx0, ctx1)
+
+chooseVar :: StateT (Int, Ctx) Gen (String, Ty)
+chooseVar = undefined
 
 splitAndInsert :: Ctx -> StateT (Int, Ctx) Gen ()
 splitAndInsert ctx = do
   (ctx0, ctx1) <- split
   replace $ safeConcat (safeConcat ctx0 ctx) ctx1
 
-genTm :: Ty -> Gen (Term, (Int, Ctx))
+genTm :: Ty -> Gen ((Term, Ty), (Int, Ctx))
 genTm ty = sized (\n -> runStateT (go ty n) (0, []))
     where 
-      go :: Ty -> Int -> StateT (Int, Ctx) Gen Term
-      go TyEps _ = return EpsR
-      go TyInt _ = IntR <$> lift arbitrary
+      go :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
+      go TyEps _ = return (EpsR, TyEps)
+      go TyInt _ = do
+        tm <- IntR <$> ST.lift arbitrary
+        return (tm, TyInt)
       go (TyPlus s t) 0 = do  
         x <- lookupOrBind (TyPlus s t)
-        return $ Var x (TyPlus s t)
+        return (Var x (TyPlus s t), TyPlus s t)
       go (TyPlus s t) n = do
-        l <- InL <$> go s (n `div` 2)
-        r <- InR <$> go t (n `div` 2)
-        other <- go' (TyPlus s t) n
-        lift $ oneof [return l, return r, return other]
+        (l, _) <- go s (n `div` 2)
+        (r, _) <- go t (n `div` 2)
+        (other, _) <- go' (TyPlus s t) n
+        choice <- ST.lift $ oneof [return (InL l), return (InR r), return other]
+        return (choice, TyPlus s t)
       go (TyCat s t) 0 = do
         x <- lookupOrBind (TyCat s t)
-        return $ Var x (TyCat s t)
+        return (Var x (TyCat s t), TyCat s t)
       go (TyCat s t) n = do
-        catr <- do
-          (gamma, delta) <- split
-          replace gamma
-          e1 <- go s (n `div` 2)
-          (_, gamma') <- get
-          replace delta
-          e2 <- go t (n `div` 2)
-          (_, delta') <- get
-          replace (safeConcat gamma' delta')
-          return $ CatR e1 e2
-        other <- go' (TyCat s t) n
-        lift $ oneof [return catr, return other]
-      go (TyStar s) 0 = return $ Nil (TyStar s)
+        (gamma, delta) <- split
+        replace gamma
+        (e1, _) <- go s (n `div` 2)
+        (_, gamma') <- get
+        replace delta
+        (e2, _) <- go t (n `div` 2)
+        (_, delta') <- get
+        replace (safeConcat gamma' delta')
+        let catr = CatR e1 e2
+        (other, _) <- go' (TyCat s t) n
+        choice <- ST.lift $ oneof [return catr, return other]
+        return (choice, TyCat s t)
+      go (TyStar s) 0 = return (Nil (TyStar s), TyStar s)
       go (TyStar s) n = do
-        nil <- return $ Nil (TyStar s)
-        lst <- do                                                                    
-            (gamma, delta) <- split
-            replace gamma
-            e1 <- go s (n `div` 2)
-            (_, gamma') <- get
-            replace delta
-            e2 <- go (TyStar s) (n `div` 2)
-            (_, delta') <- get
-            replace (gamma' ++ delta')
-            return $ Cons e1 e2
-        other <- go' (TyStar s) n
-        lift $ oneof [return nil, return lst, return other]
-      go' :: Ty -> Int -> StateT (Int, Ctx) Gen Term
+        let nil = Nil (TyStar s)
+        (gamma, delta) <- split
+        replace gamma
+        (e1, _) <- go s (n `div` 2)
+        (_, gamma') <- get
+        replace delta
+        (e2, _) <- go (TyStar s) (n `div` 2)
+        (_, delta') <- get
+        replace (gamma' ++ delta')
+        let lst = Cons e1 e2
+        (other, _) <- go' (TyStar s) n
+        choice <- ST.lift $ oneof [return nil, return lst, return other]
+        return (choice, TyStar s)
+      go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
       go' r 0 = do
         x <- lookupOrBind r
-        return $ Var x r
+        return (Var x r, r)
       go' r n = do
-        choice <- lift $ elements [0..4]
+        choice <- ST.lift $ elements [0..4]
         case choice of
           0 -> do                                              
               x <- lookupOrBind r
-              return $ Var x r
+              return (Var x r, r)
           1 -> do
               x <- fresh
-              s <- lift genTy
-              t <- lift genTy 
+              s <- ST.lift genTy
+              t <- ST.lift genTy 
 
               splitAndInsert [Atom x s]
-            
-              e1 <- go r (n `div` 2)
+              (e1, _) <- go r (n `div` 2)
             
               y <- fresh
               replaceElement [Atom y t] x
             
-              e2 <- go r (n `div` 2)
+              (e2, _) <- go r (n `div` 2)
             
               z <- fresh
               replaceElement [Atom z (TyPlus s t)] y
-              return $ PlusCase z x e1 y e2
+              return (PlusCase z x e1 y e2, TyPlus s t)
           2 -> do                  
               x <- fresh
-              s <- lift genTy
+              s <- ST.lift genTy
 
               (gamma', temp) <- split
               replace temp
               (delta, gamma'') <- split
               replace (safeConcat (safeConcat gamma' [Atom x s]) gamma'')
 
-              e' <- go r (n `div` 2)
+              (e', _) <- go r (n `div` 2)
               (_, ctx') <- get
 
               replace delta
 
-              e <- go s (n `div` 2)
+              (e, _) <- go s (n `div` 2)
               (_, delta') <- get
 
               replace ctx'
               replaceElement delta' x
 
-              return $ Let x s e e'
+              return (Let x s e e', r)
           3 -> do                                             
               z <- fresh
-              s <- lift genTy
-              t <- lift genTy
+              s <- ST.lift genTy
+              t <- ST.lift genTy
               x <- fresh
               y <- fresh
 
               splitAndInsert [Pair x s y t]
 
-              e <- go r (n `div` 2)
+              (e, _) <- go r (n `div` 2)
 
               replaceElement [Atom z (TyCat s t)] x
 
-              return $ CatL x y z e
+              return (CatL x y z e, TyCat s t)
           4 -> do                                           
               z <- fresh
-              s <- lift genTy
+              s <- ST.lift genTy
 
-              e <- go s (n `div` 2)
+              (e, _) <- go s (n `div` 2)
 
               splitAndInsert [Atom z (TyStar s)]
 
@@ -314,17 +342,18 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
 
               replaceElement [Pair x s xs (TyStar s)] z
 
-              es <- go (TyStar s) (n `div` 2)
+              (es, _) <- go (TyStar s) (n `div` 2)
 
               replaceElement [Atom z (TyStar s)] x
 
-              return $ StarCase z e x xs es
+              return (StarCase z e x xs es, TyStar s)
           _ -> error "Shouldn't be possible..."
 
 data Error = TypeMismatch
            | OrderViolation 
            | NotImplemented Term 
            | LookupFailed String
+           | UnfilledHole Term
            deriving (Show, Eq)
 
 matchType :: Ty -> (Ty, PO.Pairs) -> Either Error (Ty, PO.Pairs)
@@ -426,13 +455,16 @@ check ctx (Let x s e e') r = do
     let all_e_vars = PO.toList eUses >>= \(a, b) -> [a, b]
     orderUnion e't eUses (PO.substAll all_e_vars x e'Uses)
 
+-- check _ tm Hole = Left $ UnfilledHole tm
+
 check _ term _ = Left $ NotImplemented term
 
 data ErrorCount = ErrorCount {
     orderViolations   :: Int,
     typeMismatches    :: Int,
     lookupFailures    :: Int,
-    notImplemented    :: Int
+    notImplemented    :: Int,
+    hole              :: Int
 } deriving (Show)
 
 categorizeError :: Error -> ErrorCount -> ErrorCount
@@ -440,16 +472,17 @@ categorizeError (TypeMismatch) counts = counts { typeMismatches = typeMismatches
 categorizeError OrderViolation counts     = counts { orderViolations = orderViolations counts + 1 }
 categorizeError (LookupFailed _) counts   = counts { lookupFailures = lookupFailures counts + 1 }
 categorizeError (NotImplemented _) counts = counts { notImplemented = notImplemented counts + 1 }
+categorizeError (UnfilledHole _) counts = counts { hole = hole counts + 1 }
 
 initialErrorCount :: ErrorCount
-initialErrorCount = ErrorCount 0 0 0 0
+initialErrorCount = ErrorCount 0 0 0 0 0
 
 prop_check_term :: Gen (Either Error (PO.Pairs, (Ty, PO.Pairs)))
 prop_check_term = do
   ty <- genTy
-  (term, (_, ctx)) <- genTm ty
-  return $ case check ctx term ty of
-    Right (ty, pairs) -> Right (pairs, (ty, pairs))
+  ((term, ty'), (_, ctx)) <- genTm ty
+  return $ case check ctx term ty' of
+    Right (ty', pairs) -> Right (pairs, (ty', pairs))
     Left err     -> Left err
 
 runAndReport :: IO ()
@@ -474,6 +507,7 @@ runAndReport = do
   putStrLn $ "Type Mismatches: " ++ show (typeMismatches errorCounts)
   putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
   putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
+  putStrLn $ "Hole Errors: " ++ show (notImplemented errorCounts)
 
 categorizeResult :: (Int, ErrorCount, [PO.Pairs]) -> Either Error (PO.Pairs, (Ty, PO.Pairs)) -> (Int, ErrorCount, [PO.Pairs])
 categorizeResult (successes, counts, orders) (Right (po, _)) =
