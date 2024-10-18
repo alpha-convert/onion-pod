@@ -91,7 +91,7 @@ data Term where
 genTy :: Gen Ty
 genTy = sized go
   where
-    go 0 = frequency [(1, return TyEps), (1, return TyInt), (1, return Hole)]
+    go 0 = frequency [(1, return TyEps), (1, return TyInt)] --, (1, return Hole)]
     go n = frequency [ (2, TyCat <$> go (n `div` 2) <*> go (n `div` 2))
                      , (2, TyPlus <$> go (n `div` 2) <*> go (n `div` 2))
                      , (2, TyStar <$> go (n `div` 2))
@@ -255,6 +255,7 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
         (other, _) <- go' (TyStar s) n
         choice <- ST.lift $ oneof [return nil, return lst, return other]
         return (choice, TyStar s)
+{-
       go Hole 0 = do
         (_, ctx) <- get
         let ctxList = extractBindings ctx
@@ -268,10 +269,8 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
             n <- ST.lift $ choose (0, length ctxList - 1)  -- Choose a valid index
             let (x, s) = ctxList !! n
             return (Var x s, s)
-      go Hole n = do
-        s <- ST.lift genTyConcrete
-        e <- go' s (n `div` 2)
-        return e
+      go Hole _ = undefined
+-}
       go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
       go' r 0 = do
         x <- lookupOrBind r
