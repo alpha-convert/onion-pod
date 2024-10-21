@@ -255,8 +255,7 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
         (other, _) <- go' (TyStar s) n
         choice <- ST.lift $ oneof [return nil, return lst, return other]
         return (choice, TyStar s)
-{-
-      go Hole 0 = do
+      go Hole _ = do
         (_, ctx) <- get
         let ctxList = extractBindings ctx
         if null(ctxList)
@@ -269,18 +268,16 @@ genTm ty = sized (\n -> runStateT (go ty n) (0, []))
             n <- ST.lift $ choose (0, length ctxList - 1)  -- Choose a valid index
             let (x, s) = ctxList !! n
             return (Var x s, s)
-      go Hole _ = undefined
--}
       go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
       go' r 0 = do
-        x <- lookupOrBind r
-        return (Var x r, r)
+        (_, ctx) <- get
+        let x = lookupByType ctx r
+        case x of
+          Just x -> return (Var x r, r)
+          Nothing -> go r 1
       go' r n = do
-        choice <- ST.lift $ elements [0..4]
+        choice <- ST.lift $ elements [1..4]
         case choice of
-          0 -> do                                              
-              x <- lookupOrBind r
-              return (Var x r, r)
           1 -> do
               x <- fresh
               s <- ST.lift genTyConcrete
