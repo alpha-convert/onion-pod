@@ -18,6 +18,7 @@ definitional e (SF x0 next_in) = SF (x0,e) next
                 Done -> Done
                 Skip x'' -> Skip (x'',VarElim x)
                 Yield (TEV z ev) x'' -> if z == x then Yield ev (x'',VarElim x) else Skip (x'',VarElim x)
+                Rec _ -> error "impossible: variables cannot be recursive"
 
         nextFromElim x' (Proj1Elim c) =
             case nextFromElim x' c of

@@ -134,6 +134,13 @@ inlineElims e = go mempty e
             EPlusCase c (go m e1) (go (Map.insert x (Proj1Elim (delPi2 c)) (Map.insert xs (Proj2Elim (delPi2 c)) m)) e2)
         go m (Fix e') = EFix (go m e')
         go m Rec = ERec
+        {-FIXME: Hmm. this might not work if nested inside a CatL.
+            let (a;b) = e in
+            (3::a;5::b).
+            introduces two independent copies of e... doubles the computation.
+            SHIT!
+            We definitely want to share those.
+        -}
         go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
 data RunState =
@@ -143,3 +150,15 @@ data RunState =
     | SInR RunState
     | SPair RunState RunState
     | STy Ty
+
+{-
+
+fix foo(xs : (s + t)*) s* || t* :=
+    case xs of
+       nil => nil
+     | y::ys =>
+        let u = foo(ys) in 
+        let (as,bs) = u in
+        case y of
+            inl a => (a:as,bs)
+-}

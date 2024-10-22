@@ -16,11 +16,7 @@ module Imperative.Stream where
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import GHC.STRef (STRef(..), newSTRef, readSTRef, writeSTRef)
-import Control.Monad (forM_)
 import Control.Monad.ST (ST, runST)
-import GHC.Arr
-import Control.Applicative
-import Data.Function
 
 
 data StreamFunc m t i a where
@@ -74,7 +70,7 @@ sfold f z (S iinit (SF sinit next)) = iinit $ \i -> sinit $ \x ->
 
 sFromList :: (Lift a, Quote m) => [a] -> IStream m t (Code m (STRef t [a])) a
 sFromList xs = IS (\k -> [|| do {inp_ref <- newSTRef xs; $$(k [|| inp_ref ||])} ||])
-               (\inp_ref done skip yield -> [|| do
+               (\inp_ref done _ yield -> [|| do
                     inp_list <- readSTRef $$inp_ref
                     case inp_list of
                         [] -> $$done

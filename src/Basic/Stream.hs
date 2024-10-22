@@ -22,6 +22,7 @@ data Step s a where
     Done :: Step s a
     Skip :: s -> Step s a
     Yield :: a -> s -> Step s a
+    Rec :: s -> Step s a
 
 data StreamFunc s a where
     SF :: forall s a. s -> (s -> Step s a) -> StreamFunc s a

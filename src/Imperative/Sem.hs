@@ -51,7 +51,19 @@ semElim (Proj2Elim c) s =
 semElim (LetElim e) s = semElimTerm e s
 
 semElimTerm :: (Quote m) => ElimTerm -> IStream m t i TaggedEvent -> Stream m t i Event
-semElimTerm (EUse c t) s = undefined
+semElimTerm (EUse c t) s =
+    semElim c s & \(S iinit (SF cinit next)) ->
+    S iinit $ SF (\k -> cinit (\cx0 -> [|| do { sref <- newSTRef t ; $$(k (cx0,[|| sref ||]))} ||]))
+        $ \i (x0ref,tref) done skip yield -> [|| do
+            t <- readSTRef $$tref
+            if isNull t then $$done
+            else $$(next i x0ref done skip (\cev -> [|| do
+                    let ev = $$cev
+                    modifySTRef $$tref (`deriv` ev)
+                    $$(yield [||ev||])
+                ||]
+             ))
+        ||]
 
 semElimTerm EEpsR (IS iinit _) = S iinit $ SF ($ ()) $ \_ _ done _ _ -> done
 
