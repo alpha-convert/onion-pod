@@ -21,6 +21,7 @@ import Language.Haskell.TH.Syntax
 
 data Binding = Atom String Ty | Pair String Ty String Ty
 data Ty = TyEps | TyInt | TyCat Ty Ty | TyPlus Ty Ty | TyStar Ty deriving (Eq,Ord,Show,Lift)
+data LR = L | R | NA
 
 -- Arguments are always holes.
 data PossibleTerms = HCatR | HPlusR | HStarR | HStarL | HCatL | HPlusL | HLet | HVar
@@ -238,9 +239,7 @@ leaf = do
       let (x, s) = ctxList !! n
       return (Var x s, s)
 
-genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx))
-genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
-  where
+    {-
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
     go' TyEps _ = return (EpsR, TyEps)
     go' TyInt _ = do
@@ -315,37 +314,47 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
 
           return (Let x s e e', t)
         _ -> error ""
-    go :: Maybe Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
-    go (Just TyEps) _ = return (EpsR, TyEps)
-    go (Just TyInt) _ = do
+    -}
+
+
+
+genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx))
+genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
+  where
+    go :: Maybe Ty -> LR -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
+    go (Just TyEps) _ _ = return (EpsR, TyEps)
+    go (Just TyInt) _ _ = do
       tm <- IntR <$> ST.lift arbitrary
       return (tm, TyInt)
-    go (Just (TyStar s)) n = do -- Lazy, build this out later.
+    go (Just r) L _ = do
+      x <- lookupOrBind r
+      return (Var x r, r)
+    go (Just (TyStar s)) R n = do -- Lazy, build this out later.
       (gamma, delta) <- split
       replace gamma
-      (e, _) <- go (Just s) (n + 1) 
+      (e, _) <- go (Just s) R (n + 1) 
       (_, gamma') <- get
       replace (safeConcat gamma' delta)
       return (Cons e (Nil (TyStar s)), TyStar s)
-    go (Just (TyCat s t)) n = do
+    go (Just (TyCat s t)) R n = do
       (gamma, delta) <- split
       replace gamma
-      (e1, _) <- go (Just s) (n + 1)
+      (e1, _) <- go (Just s) R (n + 1)
       (_, gamma') <- get
       replace delta
-      (e2, _) <- go (Just t) (n + 1)
+      (e2, _) <- go (Just t) R (n + 1)
       (_, delta') <- get
       replace (safeConcat gamma' delta')
       return (CatR e1 e2, TyCat s t)
-    go (Just (TyPlus s t)) n = do
-      (e1, _) <- go (Just s) (n + 1)
-      (e2, _) <- go (Just t) (n + 1)
+    go (Just (TyPlus s t)) R n = do
+      (e1, _) <- go (Just s) R (n + 1)
+      (e2, _) <- go (Just t) R (n + 1)
       choice' <- ST.lift $ oneof [return (InL e1, TyPlus s t), return (InR e2, TyPlus s t)]
       return choice'
-    go Nothing 0 = do
+    go Nothing _ 0 = do
       leafNode <- leaf
       return leafNode
-    go Nothing n = do
+    go Nothing _ n = do
       choice <- ST.lift $ oneof [
         return HCatR, 
         return HCatL, 
@@ -359,23 +368,23 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
         HCatR -> do
           (gamma, delta) <- split
           replace gamma
-          (x, s) <- go Nothing (n `div` 2)
+          (x, s) <- go Nothing NA (n `div` 2)
           (_, gamma') <- get
           replace delta
-          (y, t) <- go Nothing (n `div` 2)
+          (y, t) <- go Nothing NA (n `div` 2)
           (_, delta') <- get
           replace (safeConcat gamma' delta')
           return (CatR x y, TyCat s t)
 
         HCatL -> do
-          (_, s) <- go Nothing (n `div` 2)
-          (_, t) <- go Nothing (n `div` 2)
+          (_, s) <- go Nothing NA (n `div` 2)
+          (_, t) <- go Nothing NA (n `div` 2)
 
           x <- fresh
           y <- fresh
 
           splitAndInsert [Pair x s y t]
-          (e, r) <- go Nothing (n `div` 2)
+          (e, r) <- go Nothing NA (n `div` 2)
 
           z <- fresh
           replaceElement [Atom z (TyCat s t)] x
@@ -384,42 +393,45 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
         HStarR -> do
           (gamma, delta) <- split
           replace gamma
-          (e, s) <- go Nothing (n `div` 2) 
+          (e, s) <- go Nothing NA (n `div` 2) 
           (_, gamma') <- get
           replace (safeConcat gamma' delta)
           return (Cons e (Nil (TyStar s)), TyStar s)
         HStarL -> do
-          (e, r) <- go Nothing (n `div` 2)
+          (e, r) <- go Nothing NA (n `div` 2)
 
-          (_, s) <- go Nothing (n `div` 2)
+          (_, s) <- go Nothing NA (n `div` 2)
 
           x <- fresh
           xs <- fresh
           z <- fresh
 
           splitAndInsert [Pair x s xs (TyStar s)]
-          (es, _) <- go' r (n `div` 2)
+          lr <- ST.lift $ elements [L, R]
+          (es, _) <- go (Just r) lr (n `div` 2)
 
           replaceElement [Atom z (TyStar s)] x
 
           return (StarCase z e x xs es, r)
         HPlusR -> do
-          (e1, s) <- go Nothing (n `div` 2)
-          (e2, t) <- go Nothing (n `div` 2)
+          (e1, s) <- go Nothing NA (n `div` 2)
+          (e2, t) <- go Nothing NA (n `div` 2)
           choice' <- ST.lift $ oneof [return (InL e1, TyPlus s t), return (InR e2, TyPlus s t)]
           return choice'
         HPlusL -> do
-          (_, s) <- go Nothing (n `div` 2)
-          (_, t) <- go Nothing (n `div` 2)
+          (_, s) <- go Nothing NA (n `div` 2)
+          (_, t) <- go Nothing NA (n `div` 2)
 
           x <- fresh
           y <- fresh
 
           splitAndInsert [Atom x s]
-          (e1, r1) <- go Nothing (n `div` 2)
+          
+          (e1, r1) <- go Nothing NA (n `div` 2)
 
           replaceElement [Atom y t] x
-          (e2, _) <- go' r1 (n `div` 2)
+          lr <- ST.lift $ elements [L, R]
+          (e2, _) <- go (Just r1) lr (n `div` 2)
 
           z <- fresh
           replaceElement [Atom z (TyPlus s t)] y
@@ -431,22 +443,23 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
           (delta, gamma'') <- split
           replace delta
 
-          (e, s) <- go Nothing (n `div` 2)
+          (e, s) <- go Nothing NA (n `div` 2)
           (_, delta') <- get
 
           x <- fresh
           replace (safeConcat (safeConcat gamma' [Atom x s]) gamma'')
 
-          (e', t) <- go Nothing (n `div` 2)
+          (e', t) <- go Nothing NA (n `div` 2)
           replaceElement delta' x
 
           return (Let x s e e', t)
         
         HVar -> do
-          (_, s) <- go Nothing (n `div` 2)
+          (_, s) <- go Nothing NA (n `div` 2)
           x <- fresh
           add (Atom x s)
           return (Var x s, s)
+    go _ _ _ = undefined
 
 {-
 genTm :: Ty -> Gen ((Term, Ty), (Int, Ctx))
@@ -714,12 +727,12 @@ prop_check_term = do
 
 runAndReport :: IO ()
 runAndReport = do
-  results <- generate (replicateM 1000 prop_check_term)
+  results <- generate (replicateM 10000 prop_check_term)
 
   let (successes, errorCounts, successesList, failuresList) = 
         foldl categorizeResult (0, initialErrorCount, [], []) results
 
-  let numFailed = 1000 - successes
+  let numFailed = 10000 - successes
 
   putStrLn "\nGenerated Terms and Their Types (Successful Checks):"
   mapM_ printTermAndTypes successesList
@@ -727,11 +740,11 @@ runAndReport = do
   putStrLn "\nFailed Terms and Their Errors:"
   mapM_ printFailedTermAndError failuresList
 
-  putStrLn $ "\nTotal terms generated: " ++ show 1000
+  putStrLn $ "\nTotal terms generated: " ++ show 10000
   putStrLn $ "Successful type checks: " ++ show successes
   putStrLn $ "Failed type checks: " ++ show numFailed
-  putStrLn $ "Success rate: " ++ show (fromIntegral successes / 1000 * 100) ++ "%"
-  putStrLn $ "Failure rate: " ++ show (fromIntegral numFailed / 1000 * 100) ++ "%"
+  putStrLn $ "Success rate: " ++ show (fromIntegral successes / 10000 * 100) ++ "%"
+  putStrLn $ "Failure rate: " ++ show (fromIntegral numFailed / 10000 * 100) ++ "%"
 
   putStrLn "\nError breakdown:"
   putStrLn $ "Order Violations: " ++ show (orderViolations errorCounts)
