@@ -241,10 +241,103 @@ leaf = do
 genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx))
 genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
   where
+    go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
+    go' t n = do
+      choice <- ST.lift $ elements [1..5]
+      case choice of
+        1 -> do
+          (_, s) <- go Nothing (n + 1)
+          (_, t') <- go Nothing (n + 1)
+
+          x <- fresh
+          y <- fresh
+
+          splitAndInsert [Pair x s y t']
+          (e, r) <- go (Just t) (n + 1)
+
+          z <- fresh
+          replaceElement [Atom z (TyCat s t')] x
+          return (CatL x y z e, r)
+        2 -> do          
+          (e, r) <- go (Just t) (n + 1)
+
+          (_, s) <- go Nothing (n + 1)
+
+          x <- fresh
+          xs <- fresh
+          z <- fresh
+
+          splitAndInsert [Pair x s xs (TyStar s)]
+          (es, _) <- go (Just r) (n + 1)
+
+          replaceElement [Atom z (TyStar s)] x
+
+          return (StarCase z e x xs es, r)
+        3 -> do
+          (_, s) <- go (Just t) (n + 1)
+          x <- fresh
+          add (Atom x s)
+          return (Var x s, s)
+        4 -> do
+          x <- fresh
+          s <- ST.lift genTyConcrete
+          t' <- ST.lift genTyConcrete
+
+          splitAndInsert [Atom x s]
+          (e1, _) <- go (Just t) (n + 1)
+        
+          y <- fresh
+          replaceElement [Atom y t'] x
+        
+          (e2, _) <- go (Just t) (n + 1)
+        
+          z <- fresh
+          replaceElement [Atom z (TyPlus s t')] y
+          return (PlusCase z x e1 y e2, t)
+        5 -> do
+          (gamma', temp) <- split
+          replace temp
+          (delta, gamma'') <- split
+          replace delta
+
+          (e, s) <- go Nothing (n + 1)
+          (_, delta') <- get
+
+          x <- fresh
+          replace (safeConcat (safeConcat gamma' [Atom x s]) gamma'')
+
+          (e', t) <- go (Just t) (n + 1)
+          replaceElement delta' x
+
+          return (Let x s e e', t)
+        _ -> error ""
     go :: Maybe Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
-    go (Just n) _ = do
-      x <- lookupOrBind n
-      return (Var x n, n)
+    go (Just TyEps) _ = return (EpsR, TyEps)
+    go (Just TyInt) _ = do
+      tm <- IntR <$> ST.lift arbitrary
+      return (tm, TyInt)
+    go (Just (TyStar s)) n = do -- Lazy, build this out later.
+      (gamma, delta) <- split
+      replace gamma
+      (e, _) <- go (Just s) (n + 1) 
+      (_, gamma') <- get
+      replace (safeConcat gamma' delta)
+      return (Cons e (Nil (TyStar s)), TyStar s)
+    go (Just (TyCat s t)) n = do
+      (gamma, delta) <- split
+      replace gamma
+      (e1, _) <- go (Just s) (n + 1)
+      (_, gamma') <- get
+      replace delta
+      (e2, _) <- go (Just t) (n + 1)
+      (_, delta') <- get
+      replace (safeConcat gamma' delta')
+      return (CatR e1 e2, TyCat s t)
+    go (Just (TyPlus s t)) n = do
+      (e1, _) <- go (Just s) (n + 1)
+      (e2, _) <- go (Just t) (n + 1)
+      choice' <- ST.lift $ oneof [return (InL e1, TyPlus s t), return (InR e2, TyPlus s t)]
+      return choice'
     go Nothing 0 = do
       leafNode <- leaf
       return leafNode
@@ -291,7 +384,6 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
           (_, gamma') <- get
           replace (safeConcat gamma' delta)
           return (Cons e (Nil (TyStar s)), TyStar s)
-
         HStarL -> do
           (e, r) <- go Nothing (n `div` 2)
 
@@ -312,9 +404,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
           (e2, t) <- go Nothing (n `div` 2)
           choice' <- ST.lift $ oneof [return (InL e1, TyPlus s t), return (InR e2, TyPlus s t)]
           return choice'
-
         HPlusL -> do
-          -- Generate a PlusCase term with constrained types
           (_, s) <- go Nothing (n `div` 2)
           (_, t) <- go Nothing (n `div` 2)
 
@@ -325,7 +415,6 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
           (e1, r1) <- go Nothing (n `div` 2)
 
           replaceElement [Atom y t] x
-          -- Call genTerm with a specific type
           (e2, _) <- go (Just r1) (n `div` 2)
 
           z <- fresh
