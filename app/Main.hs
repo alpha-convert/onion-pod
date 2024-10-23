@@ -242,6 +242,10 @@ genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx))
 genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
   where
     go' :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
+    go' TyEps _ = return (EpsR, TyEps)
+    go' TyInt _ = do
+      tm <- IntR <$> ST.lift arbitrary
+      return (tm, TyInt)
     go' t n = do
       choice <- ST.lift $ elements [1..5]
       case choice of
@@ -394,7 +398,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
           z <- fresh
 
           splitAndInsert [Pair x s xs (TyStar s)]
-          (es, _) <- go (Just r) (n `div` 2)
+          (es, _) <- go' r (n `div` 2)
 
           replaceElement [Atom z (TyStar s)] x
 
@@ -415,7 +419,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy n) (0, []))
           (e1, r1) <- go Nothing (n `div` 2)
 
           replaceElement [Atom y t] x
-          (e2, _) <- go (Just r1) (n `div` 2)
+          (e2, _) <- go' r1 (n `div` 2)
 
           z <- fresh
           replaceElement [Atom z (TyPlus s t)] y
