@@ -103,8 +103,6 @@ denoteElimTermCps e (SF @s x0 next) = SF (x0, e) next'
 denoteElimTermCps' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 denoteElimTermCps' e (S sf) = S (denoteElimTermCps e sf)
 
-
-
 semElim :: Elim -> StreamFunc s TaggedEvent -> StreamFunc (s,RunState) Event
 semElim (VarElim y) (SF i0 next) = SF (i0,SUnit) $
     \(i,_) done skip yield -> next i done (\i' -> skip (i',SUnit)) (\(TEV z ev) i' ->

@@ -37,6 +37,10 @@ parseEvents (CatEvA ev : evs) =
         where
             peelCatEvA (CatEvA ev) = Just ev
             peelCatEvA _ = Nothing
+parseEvents (CatPunc:evs) = parseEvents evs
+parseEvents _ = error ""
+
+
 
 serialize :: Val -> [Event]
 serialize EpsVal = []
@@ -68,9 +72,9 @@ eval (StarCase xs e y ys e') m =
         Just (InlVal EpsVal) -> eval e m
         Just (InrVal (PairVal v1 v2)) -> eval e' (M.insert y v1 (M.insert ys v2 m))
 eval (Let x e e') m = eval e' (M.insert x (eval e m) m)
+
 eval (Fix _) _ = error "unimplemented."
 eval Rec _ = error "unimplemented."
-
 
 bigStepTerm :: Term -> [TaggedEvent] -> [Event]
 bigStepTerm e xs =

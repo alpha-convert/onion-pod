@@ -1,3 +1,4 @@
+
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
@@ -31,7 +32,7 @@ catR :: VNf v a -> VNf v b -> VNf v (a,b)
 catR NDone nf = NSendThen NCatPunc nf
 catR (NSendThen ne nf) nf' = NSendThen (NCatEvA ne) (catR nf nf')
 catR (NCase b k k') nf' = NCase b (\vs -> catR (k vs) nf') (\vs -> catR (k' vs) nf')
-
+{-
 plusCase :: v (Either a b) -> (v a -> VTerm v c) -> (v b -> VTerm v c) -> VNf v c
 plusCase = _
 
@@ -51,3 +52,4 @@ normalize (T e) = NF (go e)
         go (InR e) = NSendThen NPlusPuncB (go e)
         go (Let e k) = nLet (go e) k
 
+-}

@@ -156,4 +156,5 @@ semElimTerm (EPlusCase c e1 e2) s =
 
 semElimTerm (EFix e) _ = undefined
 semElimTerm ERec s = undefined
-semElimTerm _ _ = undefined
+semElimTerm tm _ = SF (error "Initial state undefined due to unexpected term") $ \_ -> 
+    error $ "TERM: " ++ show tm

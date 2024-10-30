@@ -273,8 +273,6 @@ genStreamFromList xs = do
 --         (next -> Yield a x,Nothing) -> Yield a (x,Just a)
 --         s@(x,Just a) -> Yield a s
 
-
-
 -- {- applies the condition to the first element of the input stream, and then switches to one or the other -}
 -- sIf :: (a -> Bool) -> Stream a -> Stream b -> Stream b -> Stream b
 -- sIf p (S (SF x0 next)) (S (SF y0 next0)) (S (SF y1 next1)) = S (SF (Left x0) next')
