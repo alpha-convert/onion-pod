@@ -40,10 +40,10 @@ data Term where
     CatR :: Term -> Term -> Term
     {-
     -}
-    InL :: Term -> Term
-    InR :: Term -> Term
+    InL :: Term -> Ty -> Term
+    InR :: Term -> Ty -> Term
     PlusCase :: String -> String -> Term -> String -> Term -> Term
-    Nil :: Term
+    Nil :: Ty -> Term
     Cons :: Term -> Term -> Term
     StarCase :: String -> Term -> String -> String -> Term -> Term
     -- Wait :: String -> Ty -> Term -> Term
@@ -52,7 +52,7 @@ data Term where
         ------------------------------------
         G;D;G' |- let x = e in e' : r
     -}
-    Let :: String -> Term -> Term -> Term
+    Let :: String -> Ty -> Term -> Term -> Term
     {-
                 G |-_{G -> s} e : s
         ------------------------------------ (uhhhhh)

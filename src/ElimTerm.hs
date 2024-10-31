@@ -122,12 +122,12 @@ inlineElims e = go mempty e
         go m (CatL x y z e) =
             let c = getElim m z in
             go (Map.insert x (Proj1Elim c) (Map.insert y (Proj2Elim c) m)) e
-        go m (InL e) = EInL (go m e)
-        go m (InR e) = EInR (go m e)
+        go m (InL e _) = EInL (go m e)
+        go m (InR e _) = EInR (go m e)
         go m (PlusCase z x e1 y e2) =
             let c = getElim m z in
             EPlusCase c (go (Map.insert x (delPi2 c) m) e1) (go (Map.insert y (delPi2 c) m) e2)
-        go m Nil = EInL EEpsR
+        go m (Nil _) = EInL EEpsR
         go m (Cons e1 e2) = EInR (ECatR (go m e1) (go m e2))
         go m (StarCase z e1 x xs e2) =
             let c = getElim m z in
@@ -141,7 +141,7 @@ inlineElims e = go mempty e
             SHIT!
             We definitely want to share those.
         -}
-        go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
+        go m (Let x _ e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
 data RunState =
       SUnit
