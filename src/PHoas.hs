@@ -5,16 +5,13 @@ import Data.Void
 
 import qualified Term as Raw
 
-data VTerm v a where
-    EpsR :: VTerm v Void
-    Var :: v a -> VTerm v a
-    IntR :: Int -> VTerm v Int
-    CatR :: VTerm v a -> VTerm v b -> VTerm v (a,b)
-    CatL :: v (a,b) -> (v a -> v b -> VTerm v a) -> VTerm v a
-    InL :: VTerm v a -> VTerm v (Either a b)
-    InR :: VTerm v b -> VTerm v (Either a b)
-    PlusCase :: v (Either a b) -> (v a -> VTerm v c) -> (v b -> VTerm v c) -> VTerm v c
-    Let :: VTerm v a -> (v a -> VTerm v b) -> VTerm v b
-
-data Term a where
-  T :: (forall v. VTerm v a) -> Term a
+data Term c a where
+    EpsR :: Term c Void
+    Var :: c a => String -> Term c a
+    IntR :: Int -> Term c Int
+    CatR :: (c a, c b) => Term c a -> Term c b -> Term c (a,b)
+    CatL :: (c a, c b, c d) => Term c (a,b) -> (Term c a -> Term c b -> Term c d) -> Term c d
+    Inl :: (c a, c b) => Term c a -> Term c (Either a b)
+    Inr :: (c a, c b) => Term c b -> Term c (Either a b)
+    PlusCase :: (c a, c b, c d) => Term c (Either a b) -> (Term c a -> Term c d) -> (Term c b -> Term c d) -> Term c d
+    Let :: (c a, c b) => Term c a -> (Term c a -> Term c b) -> Term c b
