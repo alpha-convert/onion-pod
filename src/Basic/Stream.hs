@@ -4,7 +4,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Stream (
+module Basic.Stream (
     Step(..),
     Stream(..),
     StreamFunc(..),
@@ -22,27 +22,29 @@ data Step s a where
     Done :: Step s a
     Skip :: s -> Step s a
     Yield :: a -> s -> Step s a
+    Rec :: s -> Step s a
 
-stepStateMap :: (s -> s') -> Step s a -> Step s' a
-stepStateMap f Done = Done
-stepStateMap f (Skip x) = Skip (f x)
-stepStateMap f (Yield a x) = Yield a (f x)
+data StreamFunc s a where
+    SF :: forall s a. s -> (s -> Step s a) -> StreamFunc s a
 
-data StreamFunc s a = SF s (s -> Step s a)
+{-
+data Step i j s a where
+    Done :: Step i j s a
+    Skip :: i -> s -> Step i j s a
+    Yield :: a -> i -> s -> Step i j s a
+    Jump :: i -> j -> Step i j s a
 
-{- Stream a = S (exists s. StreamFunc s a)-}
+j NEEDS TO BE KNOWN DYNAMICALLY! j is NOT CODE!
+
+data StepFuncs i s a where
+    SFs :: forall i s a. forall j -> (s -> Step i j s a) -> (j -> StepFuncs i s a) -> StepFuncs i s a
+-}
 
 data Stream a where
     S :: forall a s. StreamFunc s a -> Stream a
 
 ssink :: Stream a
 ssink = S (SF () (const Done))
-
--- ssing :: a -> Stream a
--- ssing x = S $ SF False (\b -> if not b then Yield x True else Done)
-
--- srepeat :: a -> Stream a
--- srepeat x = S $ SF () $ const $ Yield x ()
 
 scons :: a -> Stream a -> Stream a
 scons a (S (SF x0 next)) = S $ SF Nothing $
@@ -51,6 +53,41 @@ scons a (S (SF x0 next)) = S $ SF Nothing $
         Just (next -> Done) -> Done
         Just (next -> Skip x) -> Skip (Just x)
         Just (next -> Yield a x) -> Yield a (Just x)
+
+instance Foldable Stream where
+    foldr f y0 (S (SF x0 next)) = go (x0,y0)
+        where
+            go (next -> Done,y) = y
+            go (next -> Skip x,y) = go (x,y)
+            go (next -> Yield a x,y) = go (x,f a y)
+
+sFromList :: [a] -> Stream a
+sFromList = foldr scons ssink
+
+sToList :: Stream a -> [a]
+sToList = foldr (\x xs -> xs ++ [x]) []
+
+intersperseNothings [] = return []
+intersperseNothings (x:xs) = do
+    b <- frequency [(10,return True),(7,return False)]
+    if b then (Just x:) <$> intersperseNothings xs
+    else (Nothing:) <$> intersperseNothings (x:xs)
+
+genStreamFromList :: [a] -> Gen (Stream a)
+genStreamFromList xs = do
+    xms <- intersperseNothings xs
+    return (S (SF xms next))
+        where
+            
+            next [] = Done
+            next (Nothing:xs) = Skip xs
+            next (Just a:xs) = Yield a xs
+
+-- ssing :: a -> Stream a
+-- ssing x = S $ SF False (\b -> if not b then Yield x True else Done)
+
+-- srepeat :: a -> Stream a
+-- srepeat x = S $ SF () $ const $ Yield x ()
 
 -- stail :: Stream a -> Stream a
 -- stail (S (SF x0 next)) = S $ SF (x0,False) $
@@ -220,12 +257,6 @@ scons a (S (SF x0 next)) = S $ SF Nothing $
 -- alternatively, spartition f s = smux (srepeat f) s
 -- -}
 
-sFromList :: [a] -> Stream a
-sFromList = foldr scons ssink
-
-sToList :: Stream a -> [a]
-sToList = foldr (\x xs -> xs ++ [x]) []
-
 -- instance Show a => Show (Stream a) where
 --     show = show . sToList
 
@@ -267,13 +298,6 @@ sToList = foldr (\x xs -> xs ++ [x]) []
 --     pure = ssing
 --     liftA2 = liftM2
 
-instance Foldable Stream where
-    foldr f y0 (S (SF x0 next)) = go (x0,y0)
-        where
-            go (next -> Done,y) = y
-            go (next -> Skip x,y) = go (x,y)
-            go (next -> Yield a x,y) = go (x,f a y)
-
 -- instance Semigroup (Stream a) where
 --     (<>) = sconcat
 
@@ -294,19 +318,3 @@ instance Foldable Stream where
 --             (next -> Done) -> Done
 --             (next -> Skip x) -> Skip x
 --             (next -> Yield a x) -> Yield (f a) x
-
-intersperseNothings [] = return []
-intersperseNothings (x:xs) = do
-    b <- frequency [(10,return True),(7,return False)]
-    if b then (Just x:) <$> intersperseNothings xs
-    else (Nothing:) <$> intersperseNothings (x:xs)
-
-genStreamFromList :: [a] -> Gen (Stream a)
-genStreamFromList xs = do
-    xms <- intersperseNothings xs
-    return (S (SF xms next))
-        where
-            
-            next [] = Done
-            next (Nothing:xs) = Skip xs
-            next (Just a:xs) = Yield a xs

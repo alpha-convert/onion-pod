@@ -1,18 +1,21 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveLift #-}
 module ElimTerm where
 
 import Events
 import Types
 import Term
 import qualified Data.Map as Map
-import Stream
+import Language.Haskell.TH.Syntax
+import GHC.Real (underflowError)
 
 {- Are Elims just a focusing thing? -}
-data Elim = VarElim String
-        --   | HistVarElim String
-          | Proj1Elim Elim
-          | Proj2Elim Elim
-          | LetElim ElimTerm
-          deriving (Eq,Ord,Show)
+data Elim where
+  VarElim :: String -> Elim
+  Proj1Elim :: Elim -> Elim
+  Proj2Elim :: Elim -> Elim
+  LetElim :: ElimTerm -> Elim
+  deriving (Eq, Ord, Show, Lift)
 
 {-
 Elimnel tying:
@@ -63,21 +66,45 @@ elimDeriv el ev = go el ev const
         go (LetElim e) ev k = k (LetElim e) (Just ev)
 
 
-data ElimTerm =
-      EEpsR
-    | EUse Elim Ty
-    | EIntR Int
-    | ECatR ElimTerm ElimTerm
-    | EInR ElimTerm
-    | EInL ElimTerm
-    | EPlusCase Elim ElimTerm ElimTerm
-    | EFix ElimTerm
-    -- | EWait String Ty ElimTerm
-    | ERec
-    deriving (Eq,Ord,Show)
+data ElimTerm where
+  EEpsR :: ElimTerm
+  EUse :: Elim -> Ty -> ElimTerm
+  EIntR :: Int -> ElimTerm
+  ECatR :: ElimTerm -> ElimTerm -> ElimTerm
+  EInR :: ElimTerm -> ElimTerm
+  EInL :: ElimTerm -> ElimTerm
+  EPlusCase :: Elim -> ElimTerm -> ElimTerm -> ElimTerm
+  EFix :: ElimTerm -> ElimTerm
+  ERec :: ElimTerm
+  deriving (Eq, Ord, Show, Lift)
 
 fixSubst :: ElimTerm -> ElimTerm -> ElimTerm
 fixSubst = undefined
+
+-- subst e e' x = e[e'/x]
+{-
+FIXME: this should really be locally nameless. But not entirely clear how to do so. :)
+-}
+subst :: ElimTerm -> ElimTerm -> String -> ElimTerm
+subst e e' x = go e
+    where
+        go EEpsR = EEpsR
+        go (EUse el t) = EUse (goEl el) t
+        go (EIntR n) = EIntR n
+        go (ECatR e1 e2) = ECatR (go e1) (go e2)
+        go (EInR e) = EInR (go e)
+        go (EInL e) = EInL (go e)
+        go (EPlusCase el e1 e2) = EPlusCase (goEl el) (go e1) (go e2)
+        go (EFix e) = EFix e
+        go ERec = ERec
+
+        goEl (VarElim y) | x == y = LetElim e'
+        goEl (VarElim y) | otherwise = VarElim y
+        goEl (Proj1Elim el) = Proj1Elim (goEl el)
+        goEl (Proj2Elim el) = Proj2Elim (goEl el)
+        {- FIXME: hmm this seems like it might be a problem, we're probably capturing like crazy here...-}
+        goEl (LetElim e) = LetElim (go e)
+
 
 inlineElims :: Term -> ElimTerm
 inlineElims e = go mempty e
@@ -105,78 +132,33 @@ inlineElims e = go mempty e
         go m (StarCase z e1 x xs e2) =
             let c = getElim m z in
             EPlusCase c (go m e1) (go (Map.insert x (Proj1Elim (delPi2 c)) (Map.insert xs (Proj2Elim (delPi2 c)) m)) e2)
-        -- go m (Wait x s e) = EWait x s (go (Map.insert x (HistVarElim x) m) e)
-        go m (Fix e) = EFix (go m e)
-        go _ Rec = ERec
+        go m (Fix e') = EFix (go m e')
+        go m Rec = ERec
+        {-FIXME: Hmm. this might not work if nested inside a CatL.
+            let (a;b) = e in
+            (3::a;5::b).
+            introduces two independent copies of e... doubles the computation.
+            SHIT!
+            We definitely want to share those.
+        -}
         go m (Let x e e') = go (Map.insert x (LetElim (go m e)) m) e'
 
+data RunState =
+      SUnit
+    | SBool Bool
+    | SInL RunState
+    | SInR RunState
+    | SPair RunState RunState
+    | STy Ty
 
-denoteElimTerm :: ElimTerm -> StreamFunc s TaggedEvent -> StreamFunc (s,ElimTerm) Event
-denoteElimTerm e (SF x0 next_in) = SF (x0,e) next
-    where
-        nextFromElim x' (VarElim x) =
-            case next_in x' of
-                Done -> Done
-                Skip x'' -> Skip (x'',VarElim x)
-                Yield (TEV z ev) x'' -> if z == x then Yield ev (x'',VarElim x) else Skip (x'',VarElim x)
+{-
 
-        nextFromElim x' (Proj1Elim c) =
-            case nextFromElim x' c of
-                Done -> Done
-                Skip (x'',c') -> Skip (x'',Proj1Elim c')
-                Yield (CatEvA ev) (x'',c') -> Yield ev (x'', Proj1Elim c')
-                Yield {} -> error ""
-
-        nextFromElim x' (Proj2Elim c) =
-                case nextFromElim x' c of
-                    Done -> Done
-                    Skip (x'',c') -> Skip (x'',Proj2Elim c')
-                    Yield (CatEvA _) (x'',c') -> Skip (x'', Proj2Elim c')
-
-                    Yield CatPunc (x'',c') -> Skip (x'', c') -- peel off the proj2. this is probably not an ideal way to do this, but oh well. should really be in-place.
-
-                    Yield {} -> error ""
-        
-        nextFromElim x' (LetElim e) =
-            case next (x',e) of
-                Done -> Done
-                Skip (x',e') -> Skip (x', LetElim e')
-                Yield ev (x',e') -> Yield ev (x',LetElim e')
-        
-
-        next (x',EUse c s) =
-            if isNull s
-            then Done
-            else case nextFromElim x' c of
-                    Done -> Done
-                    Skip (x'',c') -> Skip (x'',EUse c' s)
-                    Yield ev (x'',c') -> Yield ev (x'',EUse c' (deriv s ev))
-
-        next (x',EIntR n) = Yield (IntEv n) (x',EEpsR)
-
-        next (x',EEpsR) = Done
-
-        next (x',ECatR e1 e2) =
-            case next (x',e1) of
-                Skip (x'',e1') -> Skip (x'',ECatR e1' e2)
-                Yield ev (x'',e1') -> Yield (CatEvA ev) (x'',ECatR e1' e2)
-                Done -> Yield CatPunc (x',e2)
-
-        next (x',EInL e) = Yield PlusPuncA (x',e)
-        next (x',EInR e) = Yield PlusPuncB (x',e)
-
-        next (x',EPlusCase c e1 e2) =
-            case nextFromElim x' c of
-                Done -> Done
-                Skip (x',c') -> Skip (x',EPlusCase c' e1 e2)
-                Yield PlusPuncA (x',_) -> Skip (x',e1)
-                Yield PlusPuncB (x',_) -> Skip (x',e2)
-                Yield ev _ -> error $ "Unexpected event " ++ show ev ++ " from pluscase"
-
-        next (x', EFix e) = Skip (x', fixSubst (EFix e) e)
-        next (x', ERec) = error ""
-
-denoteElimTerm' :: ElimTerm -> Stream TaggedEvent -> Stream Event
-denoteElimTerm' a (S sf) = S (denoteElimTerm a sf)
-
--- TaggedEvent = (String,Event)
+fix foo(xs : (s + t)*) s* || t* :=
+    case xs of
+       nil => nil
+     | y::ys =>
+        let u = foo(ys) in 
+        let (as,bs) = u in
+        case y of
+            inl a => (a:as,bs)
+-}

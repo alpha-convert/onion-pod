@@ -24,6 +24,10 @@ dependencies:
 - mtl
 - QuickCheck
 - containers
+- hspec
+- linear-base
+- template-haskell
+- criterion
 
 ghc-options:
 - -Wall
@@ -52,6 +56,7 @@ executables:
 
 tests:
   Delta-Compiler-test:
+    defaults: hspec/hspec@main
     main:                Spec.hs
     source-dirs:         test
     ghc-options:

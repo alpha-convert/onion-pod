@@ -1,8 +1,10 @@
+{-# LANGUAGE DeriveLift #-}
 module Types where
 import Test.QuickCheck (Arbitrary (..))
 import Test.QuickCheck.Gen(Gen,frequency, sized)
+import Language.Haskell.TH.Syntax
 
-data Ty = TyEps | TyInt | TyCat Ty Ty | TyPlus Ty Ty | TyStar Ty deriving (Eq,Ord,Show)
+data Ty = TyEps | TyInt | TyCat Ty Ty | TyPlus Ty Ty | TyStar Ty deriving (Eq,Ord,Show,Lift)
 
 instance Arbitrary Ty where
     arbitrary = sized go

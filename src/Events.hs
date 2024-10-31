@@ -1,12 +1,14 @@
+{-# LANGUAGE DeriveLift  #-}
 module Events where
 
 import Types
 import Test.QuickCheck.Gen (Gen)
 import Test.QuickCheck
+import Language.Haskell.TH.Syntax
 
-data Event = IntEv Int | CatEvA Event | CatPunc | PlusPuncA | PlusPuncB deriving (Eq,Ord,Show)
+data Event = IntEv Int | CatEvA Event | CatPunc | PlusPuncA | PlusPuncB deriving (Eq,Ord,Show,Lift)
 
-data TaggedEvent = TEV String Event deriving (Eq,Ord,Show)
+data TaggedEvent = TEV String Event deriving (Eq,Ord,Show,Lift)
 
 deriv :: Ty -> Event -> Ty
 deriv TyEps _ = error ""
