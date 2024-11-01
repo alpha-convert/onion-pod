@@ -59,19 +59,19 @@ eval (CatL x y z e) m =
     case M.lookup z m of
         Just (PairVal v1 v2) -> eval e (M.insert x v1 (M.insert y v2 m))
 eval (CatR e e') m = PairVal (eval e m) (eval e' m)
-eval (InL e) m = InlVal (eval e m)
-eval (InR e) m = InrVal (eval e m)
+eval (InL e _) m = InlVal (eval e m)
+eval (InR e _) m = InrVal (eval e m)
 eval (PlusCase z x e y e') m =
     case M.lookup z m of
         Just (InlVal v) -> eval e (M.insert x v m)
         Just (InrVal v) -> eval e (M.insert y v m)
-eval Nil m = InlVal EpsVal
+eval (Nil _) m = InlVal EpsVal
 eval (Cons e e') m = InrVal (PairVal (eval e m) (eval e' m))
 eval (StarCase xs e y ys e') m =
     case M.lookup xs m of
         Just (InlVal EpsVal) -> eval e m
         Just (InrVal (PairVal v1 v2)) -> eval e' (M.insert y v1 (M.insert ys v2 m))
-eval (Let x e e') m = eval e' (M.insert x (eval e m) m)
+eval (Let x t e e') m = eval e' (M.insert x (eval e m) m)
 
 eval (Fix _) _ = error "unimplemented."
 eval Rec _ = error "unimplemented."

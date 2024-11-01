@@ -32,6 +32,7 @@ library
       CPSStaged.Stream
       ElimTerm
       Events
+      Generate
       Imperative.Sem
       Imperative.Stream
       List.Sem
@@ -40,6 +41,7 @@ library
       PHoas
       PrettyPrint
       Term
+      TypeCheck
       Types
   other-modules:
       Paths_Delta_Compiler

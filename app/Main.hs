@@ -3,26 +3,20 @@
 
 module Main where
 
-import Data.Maybe (mapMaybe)
 import Test.QuickCheck
 import ElimTerm
 import Term
 import Types
 import Events
-import Data.Foldable (toList)
 import Control.Monad.State as ST
 import Control.Monad (when, foldM)
-import Data.List (nub, (\\))
-import Test.Hspec.QuickCheck
+
 import Test.Hspec
-import Data.List (elemIndex)
 import PartialOrder as PO
-import Data.Set (Set)
 import Basic.Sem
 import Basic.Stream
 import Control.Monad (replicateM)
 import Language.Haskell.TH.Syntax
-import Basic.Stream ( sFromList, sToList )
 import List.Sem
 data Binding = Atom String Ty | Pair String Ty String Ty deriving (Eq,Ord,Show,Lift)
 data LR = L | R | NA
@@ -566,37 +560,29 @@ check ctx (Let' x s e e') r = do
 
 check _ term _ = Left $ NotImplemented term
 
--- Generate a sequence of TaggedEvents from a given context
 generateTaggedEvents :: Ctx -> Gen [TaggedEvent]
 generateTaggedEvents ctx = do
-    let bindings = extractBindings ctx  -- Extract the (String, Ty) pairs from the context
-    genTaggedEventsForContext bindings  -- Generate the TaggedEvents for the bindings
+    let bindings = extractBindings ctx 
+    genTaggedEventsForContext bindings
 
 semElimTerm' :: ElimTerm -> Stream TaggedEvent -> Stream Event
 semElimTerm' a (S sf) = S (semElimTerm a sf)
 
 exactSemSpec :: String -> Ctx -> Term -> SpecWith ()
 exactSemSpec s ctx tm = it s $ do
-    -- Generate tagged events from the given context
     taggedEvents <- generate $ generateTaggedEvents ctx
     
-    -- Print the generated tagged events for inspection
     putStrLn $ "Generated Tagged Events: " ++ show taggedEvents
     
-    -- Convert the term to its elimination form
     let eltm = inlineElims tm
     
-    -- Evaluate the term using the elimination semantics
     let evaluatedEvents = sToList (semElimTerm' eltm (sFromList taggedEvents))
     
-    -- Compute the expected events using the List.Sem semantics
     let expectedEvents = List.Sem.bigStepTerm tm taggedEvents
     
-    -- Print both the evaluated and expected events for comparison
     putStrLn $ "Evaluated Events: " ++ show evaluatedEvents
     putStrLn $ "Expected Events: " ++ show expectedEvents
     
-    -- Perform the actual comparison between evaluated and expected events
     evaluatedEvents `shouldBe` expectedEvents
 
 
@@ -629,7 +615,6 @@ runAndReport :: IO ()
 runAndReport = do
   results <- generate (replicateM 100000 prop_check_term)
 
-  -- Use foldM instead of foldl to handle IO in the accumulator
   (successes, errorCounts, _, failuresList) <- foldM categorizeResult (0, initialErrorCount, [], []) results
 
   let numFailed = 100000 - successes
@@ -653,33 +638,27 @@ categorizeResult :: (Int, ErrorCount, [(PO.Pairs, Term', Ty, Ty, Ctx)], [(Error,
                  -> Either (Error, Term', Ty, Ty, Ctx) (PO.Pairs, Term', Ty, Ty, Ctx) 
                  -> IO (Int, ErrorCount, [(PO.Pairs, Term', Ty, Ty, Ctx)], [(Error, Term', Ty, Ty, Ctx)])
 categorizeResult (successes, counts, successesList, failuresList) (Right (po, term, originalTy, inferredTy, ctx)) = do
-  -- Generate semantic evaluation after type checking success
   putStrLn "\nTerm passed type checking:"
   putStrLn $ "Term': " ++ show term
   putStrLn $ "Inferred Type: " ++ show inferredTy
   putStrLn $ "Context: " ++ show ctx
 
-  -- Run the semantic evaluation inline (replacing exactSemSpec)
-  let termConv = convertTerm term  -- Convert Term' to Term for semantic evaluation
-  let taggedEventsGen = generateTaggedEvents ctx  -- Generate TaggedEvents based on the context
-  taggedEvents <- generate taggedEventsGen  -- Actually generate the events
+  let termConv = convertTerm term  
+  let taggedEventsGen = generateTaggedEvents ctx 
+  taggedEvents <- generate taggedEventsGen
 
-  -- Print the generated TaggedEvents for inspection
   putStrLn $ "Generated Tagged Events: " ++ show taggedEvents
 
-  -- Inline elimination and semantic evaluation
   let eltm = inlineElims termConv
   let evaluatedEvents = sToList (semElimTerm' eltm (sFromList taggedEvents))
   let expectedEvents = List.Sem.bigStepTerm termConv taggedEvents
 
-  -- Print the evaluated and expected events for comparison
   putStrLn $ "Evaluated Events: " ++ show evaluatedEvents
   putStrLn $ "Expected Events: " ++ show expectedEvents
 
   return (successes + 1, counts, (po, term, originalTy, inferredTy, ctx) : successesList, failuresList)
 
 categorizeResult (successes, counts, successesList, failuresList) (Left (err, term, originalTy, inferredTy, ctx)) = do
-  -- Print the error for failed terms
   putStrLn "----------------------------"
   putStrLn $ "Generated Term': " ++ show term
   putStrLn $ "Inferred Type: " ++ show inferredTy
