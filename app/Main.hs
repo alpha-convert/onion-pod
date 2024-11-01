@@ -21,6 +21,7 @@ import Basic.Stream
 import Control.Monad (replicateM)
 import Language.Haskell.TH.Syntax
 import List.Sem
+{-
 data Binding = Atom String Ty | Pair String Ty String Ty deriving (Eq,Ord,Show,Lift)
 data LR = L | R | NA
 
@@ -28,7 +29,7 @@ data LR = L | R | NA
 data PossibleTerm's = HCatR' | HPlusR | HStarR | HStarL | HCatL' | HPlusL | HLet' | HVar'
 
 type Ctx = [Binding]
-{-
+
 extractBindings :: Ctx -> [(String, Ty)]
 extractBindings = concatMap extractBinding
   where
@@ -646,15 +647,14 @@ categorizeResult (successes, counts, successesList, failuresList) (Right (po, te
   putStrLn $ "Inferred Type: " ++ show inferredTy
   putStrLn $ "Context: " ++ show ctx
 
-  let termConv = convertTerm term  
   let taggedEventsGen = generateTaggedEvents ctx 
   taggedEvents <- generate taggedEventsGen
 
   putStrLn $ "Generated Tagged Events: " ++ show taggedEvents
 
-  let eltm = inlineElims termConv
+  let eltm = inlineElims term
   let evaluatedEvents = sToList (semElimTerm' eltm (sFromList taggedEvents))
-  let expectedEvents = List.Sem.bigStepTerm termConv taggedEvents
+  let expectedEvents = List.Sem.bigStepTerm term taggedEvents
 
   putStrLn $ "Evaluated Events: " ++ show evaluatedEvents
   putStrLn $ "Expected Events: " ++ show expectedEvents
