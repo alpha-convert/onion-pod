@@ -1,8 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveLift #-}
 
-module GenerateTerm where
-
+module Generate where
 import Test.QuickCheck
 import ElimTerm
 import Term
@@ -10,7 +9,6 @@ import Types
 import Events
 import Control.Monad.State as ST
 import Control.Monad (when, foldM)
-
 import Test.Hspec
 import PartialOrder as PO
 import Basic.Sem
@@ -26,6 +24,13 @@ data LR = L | R | NA
 data PossibleTerm's = HCatR' | HPlusR | HStarR | HStarL | HCatL' | HPlusL | HLet' | HVar'
 
 type Ctx = [Binding]
+
+data Error = TypeMismatch
+           | OrderViolation (Maybe String) (Maybe String) String
+           | NotImplemented Term 
+           | LookupFailed String
+           | UnfilledHole
+           deriving (Show, Eq)
 
 extractBindings :: Ctx -> [(String, Ty)]
 extractBindings = concatMap extractBinding
@@ -365,10 +370,3 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
           add (Atom x s)
           return (Var x s, s)
     go _ _ _ = undefined
-
-data Error = TypeMismatch
-           | OrderViolation (Maybe String) (Maybe String) String
-           | NotImplemented Term
-           | LookupFailed String
-           | UnfilledHole
-           deriving (Show, Eq)

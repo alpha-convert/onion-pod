@@ -1,3 +1,4 @@
+
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveLift #-}
 
@@ -6,6 +7,8 @@ module Main where
 import Test.QuickCheck
 import ElimTerm
 import Term
+import TypeCheck
+import Generate
 import Types
 import Events
 import Control.Monad.State as ST
@@ -25,7 +28,7 @@ data LR = L | R | NA
 data PossibleTerm's = HCatR' | HPlusR | HStarR | HStarL | HCatL' | HPlusL | HLet' | HVar'
 
 type Ctx = [Binding]
-
+{-
 extractBindings :: Ctx -> [(String, Ty)]
 extractBindings = concatMap extractBinding
   where
@@ -560,6 +563,8 @@ check ctx (Let' x s e e') r = do
 
 check _ term _ = Left $ NotImplemented term
 
+-}
+
 generateTaggedEvents :: Ctx -> Gen [TaggedEvent]
 generateTaggedEvents ctx = do
     let bindings = extractBindings ctx 
@@ -585,7 +590,6 @@ exactSemSpec s ctx tm = it s $ do
     
     evaluatedEvents `shouldBe` expectedEvents
 
-
 data ErrorCount = ErrorCount {
     orderViolations   :: Int,
     typeMismatches    :: Int,
@@ -599,12 +603,11 @@ categorizeError (TypeMismatch) counts = counts { typeMismatches = typeMismatches
 categorizeError (OrderViolation _ _ _) counts     = counts { orderViolations = orderViolations counts + 1 }
 categorizeError (LookupFailed _) counts   = counts { lookupFailures = lookupFailures counts + 1 }
 categorizeError (NotImplemented _) counts = counts { notImplemented = notImplemented counts + 1 }
-categorizeError UnfilledHole counts = counts { hole = hole counts + 1 }
 
 initialErrorCount :: ErrorCount
 initialErrorCount = ErrorCount 0 0 0 0 0
 
-prop_check_term :: Gen (Either (Error, Term', Ty, Ty, Ctx) (PO.Pairs, Term', Ty, Ty, Ctx))
+prop_check_term :: Gen (Either (Error, Term, Ty, Ty, Ctx) (PO.Pairs, Term, Ty, Ty, Ctx))
 prop_check_term = do
   ((term, inferredTy), (_, ctx)) <- genTerm' Nothing
   return $ case check ctx term inferredTy of
@@ -634,9 +637,9 @@ runAndReport = do
   putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
   putStrLn $ "Hole Errors: " ++ show (hole errorCounts)
 
-categorizeResult :: (Int, ErrorCount, [(PO.Pairs, Term', Ty, Ty, Ctx)], [(Error, Term', Ty, Ty, Ctx)]) 
-                 -> Either (Error, Term', Ty, Ty, Ctx) (PO.Pairs, Term', Ty, Ty, Ctx) 
-                 -> IO (Int, ErrorCount, [(PO.Pairs, Term', Ty, Ty, Ctx)], [(Error, Term', Ty, Ty, Ctx)])
+categorizeResult :: (Int, ErrorCount, [(PO.Pairs, Term, Ty, Ty, Ctx)], [(Error, Term, Ty, Ty, Ctx)]) 
+                 -> Either (Error, Term, Ty, Ty, Ctx) (PO.Pairs, Term, Ty, Ty, Ctx) 
+                 -> IO (Int, ErrorCount, [(PO.Pairs, Term, Ty, Ty, Ctx)], [(Error, Term, Ty, Ty, Ctx)])
 categorizeResult (successes, counts, successesList, failuresList) (Right (po, term, originalTy, inferredTy, ctx)) = do
   putStrLn "\nTerm passed type checking:"
   putStrLn $ "Term': " ++ show term

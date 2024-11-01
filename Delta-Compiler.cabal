@@ -43,6 +43,7 @@ library
       Term
       TypeCheck
       Types
+      Util
   other-modules:
       Paths_Delta_Compiler
   autogen-modules:

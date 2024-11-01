@@ -13,13 +13,7 @@ import Basic.Sem
 import Basic.Stream
 import Language.Haskell.TH.Syntax
 import List.Sem
-
-data Error = TypeMismatch
-           | OrderViolation (Maybe String) (Maybe String) String
-           | NotImplemented Term 
-           | LookupFailed String
-           | UnfilledHole
-           deriving (Show, Eq)
+import Generate
 
 matchType :: Ty -> (Ty, PO.Pairs) -> Either Error (Ty, PO.Pairs)
 matchType expected (actual, order)
@@ -121,8 +115,3 @@ check ctx (Let x s e e') r = do
         orderUnion "Let'-U" e't eUses (PO.substAll all_e_vars x e'Uses)
 
 check _ term _ = Left $ NotImplemented term
-
-generateTaggedEvents :: Ctx -> Gen [TaggedEvent]
-generateTaggedEvents ctx = do
-    let bindings = extractBindings ctx 
-    genTaggedEventsForContext bindings
