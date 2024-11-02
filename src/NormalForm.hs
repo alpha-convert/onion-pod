@@ -10,7 +10,7 @@ module NormalForm where
 import Types
 import PHoas
 import Data.Void
-import Control.Monad (join)
+import Control.Monad (join, liftM2)
 
 class Base a where
 instance Base Int
@@ -48,17 +48,17 @@ data Cover a where
     Branch :: (Rf a, Rf b) => Ne (Either a b) -> (Term Rf a -> Cover c) -> (Term Rf b -> Cover c) -> Cover c
 
 instance Functor Cover where
+    fmap f x = x >>= Leaf . f
 
 instance Applicative Cover where
+    pure = return
+    liftA2 = liftM2
 
 instance Monad Cover where
-
-
-data TypeRep a where
-    TVoid :: TypeRep Void
-    TInt :: TypeRep Int
-    TPair :: TypeRep a -> TypeRep b -> TypeRep (a,b)
-    TSum :: TypeRep a -> TypeRep b -> TypeRep (Either a b)
+    return = Leaf
+    (Leaf x) >>= f = f x
+    (Spread ne k) >>= f = Spread ne (\e e' -> k e e' >>= f)
+    (Branch ne k k') >>= f = Branch ne ((>>= f) . k) ((>>= f) . k')
 
 
 type family Sem a where
@@ -67,8 +67,7 @@ type family Sem a where
     Sem (a,b) = Cover (Sem a, Sem b)
     Sem (Either a b) = Cover (Either (Sem a) (Sem b))
 
-class Rf a where
-    typeRep :: TypeRep a
+class StreamTyped a => Rf a where
     reify :: Sem a -> Nf a
     reflect :: Ne a -> Sem a
 
