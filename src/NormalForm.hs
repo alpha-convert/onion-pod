@@ -13,7 +13,9 @@ import Data.Void
 import Control.Monad (join, liftM2)
 
 class Base a where
-instance Base Int
+    embBase :: a -> Term Rf a
+instance Base Int where
+    embBase = IntR
 
 data Ne a where
     NVar :: String -> Ne a
@@ -33,7 +35,7 @@ embNe (NVar x) = Var x
 
 embNf :: Rf a => Nf a -> Term Rf a
 embNf (NUp ne) = embNe ne
-embNf (NLift x) = _ {- probably need to case on the typerep here -}
+embNf (NLift x) = embBase x
 embNf NEpsR = EpsR
 embNf (NCatR e e') = CatR (embNf e) (embNf e')
 embNf (NCatL ne k) = CatL (embNe ne) (\e e' -> embNf (k e e'))
@@ -102,7 +104,7 @@ instance (Rf a, Rf b) => Rf (Either a b) where
 runCover :: forall a . Rf a => Cover (Sem a) -> Sem a
 runCover = go (typeRep @a)
     where
-        go :: forall a . TypeRep a -> Cover (Sem a) -> Sem a
+        go :: forall a c. TypeRep c a -> Cover (Sem a) -> Sem a
         go TVoid _ = ()
         go TInt c = join c
         go (TPair _ _) c = join c
