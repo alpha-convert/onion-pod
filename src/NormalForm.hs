@@ -5,15 +5,17 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module NormalForm where
+module NormalForm (normalize) where
 
 import Types
 import PHoas
 import Data.Void
-import Control.Monad (join)
+import Control.Monad (join, liftM2)
 
 class Base a where
-instance Base Int
+    embBase :: a -> Term Rf a
+instance Base Int where
+    embBase = IntR
 
 data Ne a where
     NVar :: String -> Ne a
@@ -33,7 +35,7 @@ embNe (NVar x) = Var x
 
 embNf :: Rf a => Nf a -> Term Rf a
 embNf (NUp ne) = embNe ne
-embNf (NLift x) = _ {- probably need to case on the typerep here -}
+embNf (NLift x) = embBase x
 embNf NEpsR = EpsR
 embNf (NCatR e e') = CatR (embNf e) (embNf e')
 embNf (NCatL ne k) = CatL (embNe ne) (\e e' -> embNf (k e e'))
@@ -48,17 +50,17 @@ data Cover a where
     Branch :: (Rf a, Rf b) => Ne (Either a b) -> (Term Rf a -> Cover c) -> (Term Rf b -> Cover c) -> Cover c
 
 instance Functor Cover where
+    fmap f x = x >>= Leaf . f
 
 instance Applicative Cover where
+    pure = return
+    liftA2 = liftM2
 
 instance Monad Cover where
-
-
-data TypeRep a where
-    TVoid :: TypeRep Void
-    TInt :: TypeRep Int
-    TPair :: TypeRep a -> TypeRep b -> TypeRep (a,b)
-    TSum :: TypeRep a -> TypeRep b -> TypeRep (Either a b)
+    return = Leaf
+    (Leaf x) >>= f = f x
+    (Spread ne k) >>= f = Spread ne (\e e' -> k e e' >>= f)
+    (Branch ne k k') >>= f = Branch ne ((>>= f) . k) ((>>= f) . k')
 
 
 type family Sem a where
@@ -67,8 +69,7 @@ type family Sem a where
     Sem (a,b) = Cover (Sem a, Sem b)
     Sem (Either a b) = Cover (Either (Sem a) (Sem b))
 
-class Rf a where
-    typeRep :: TypeRep a
+class StreamTyped a => Rf a where
     reify :: Sem a -> Nf a
     reflect :: Ne a -> Sem a
 
@@ -103,7 +104,7 @@ instance (Rf a, Rf b) => Rf (Either a b) where
 runCover :: forall a . Rf a => Cover (Sem a) -> Sem a
 runCover = go (typeRep @a)
     where
-        go :: forall a . TypeRep a -> Cover (Sem a) -> Sem a
+        go :: forall a c. TypeRep c a -> Cover (Sem a) -> Sem a
         go TVoid _ = ()
         go TInt c = join c
         go (TPair _ _) c = join c
@@ -125,3 +126,6 @@ eval (PlusCase e k k') = runCover @a $ do
         Left sa -> eval (k (quote sa))
         Right sb -> eval (k' (quote sb))
 eval (Let e k) = eval (k e)
+
+normalize :: Rf a => Term Rf a -> Term Rf a
+normalize = quote . eval

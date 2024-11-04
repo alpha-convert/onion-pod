@@ -28,6 +28,8 @@ dependencies:
 - linear-base
 - template-haskell
 - criterion
+- constraints
+- some
 
 ghc-options:
 - -Wall
