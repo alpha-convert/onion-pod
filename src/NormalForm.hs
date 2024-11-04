@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module NormalForm where
+module NormalForm (normalize) where
 
 import Types
 import PHoas
@@ -126,3 +126,6 @@ eval (PlusCase e k k') = runCover @a $ do
         Left sa -> eval (k (quote sa))
         Right sb -> eval (k' (quote sb))
 eval (Let e k) = eval (k e)
+
+normalize :: Rf a => Term Rf a -> Term Rf a
+normalize = quote . eval
