@@ -20,7 +20,6 @@ import List.Sem
 data Binding = Atom String Ty | Pair String Ty String Ty deriving (Eq,Ord,Show,Lift)
 data LR = L | R | NA
 
--- Arguments are always holes.
 data PossibleTerm's = HCatR' | HPlusR | HStarR | HStarL | HCatL' | HPlusL | HLet' | HVar'
 
 type Ctx = [Binding]
@@ -39,18 +38,16 @@ extractBindings = concatMap extractBinding
     extractBinding (Atom x ty)      = [(x, ty)]
     extractBinding (Pair x1 ty1 x2 ty2) = [(x1, ty1), (x2, ty2)]
 
--- Top-level is always not a hole.
 genTy :: Gen Ty
 genTy = sized go
   where
-    go 0 = frequency [(1, return TyEps), (4, return TyInt)] -- Favor base types heavily
-    go n = frequency [ (1, TyCat <$> go (n `div` 2) <*> go (n `div` 2))  -- Reduce recursion depth
-                     , (1, TyPlus <$> go (n `div` 2) <*> go (n `div` 2)) -- Reduce recursion depth
-                     , (1, TyStar <$> go (n `div` 2))                    -- Reduce recursion depth
-                     , (1, return TyEps)                                 -- Favor base types
-                     , (4, return TyInt)]                                -- Favor base types
+    go 0 = frequency [(1, return TyEps), (4, return TyInt)] 
+    go n = frequency [ (1, TyCat <$> go (n `div` 2) <*> go (n `div` 2)) 
+                     , (1, TyPlus <$> go (n `div` 2) <*> go (n `div` 2))
+                     , (1, TyStar <$> go (n `div` 2))                   
+                     , (1, return TyEps)                       
+                     , (4, return TyInt)]                               
 
--- Create a fresh variable and return it.
 fresh :: StateT (Int, Ctx) Gen String
 fresh = do
     (n, ctx) <- get
@@ -94,11 +91,11 @@ matches x (Pair var1 _ var2 _) = var1 == x || var2 == x
 lookup' :: Ctx -> String -> Either Error (Ty, PO.Pairs)
 lookup' [] x = Left $ LookupFailed x
 lookup' (Atom k v : rest) x
-    | k == x = Right (v, PO.singleton (x, x))  -- Found variable, return type and PO with (x, x)
+    | k == x = Right (v, PO.singleton (x, x))
     | otherwise = lookup' rest x
 lookup' (Pair k1 v1 k2 v2 : rest) x
-    | k1 == x = Right (v1, PO.singleton (k1, k1))  -- First variable in pair found
-    | k2 == x = Right (v2, PO.singleton (k2, k2))  -- Second variable in pair found
+    | k1 == x = Right (v1, PO.singleton (k1, k1))
+    | k2 == x = Right (v2, PO.singleton (k2, k2)) 
     | otherwise = lookup' rest x
 
 bind :: Ty -> StateT (Int, Ctx) Gen String

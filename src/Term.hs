@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveLift #-}
 
 module Term where
 import Types
