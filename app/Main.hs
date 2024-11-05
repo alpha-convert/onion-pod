@@ -22,108 +22,77 @@ import Control.Monad (replicateM)
 import Language.Haskell.TH.Syntax
 import List.Sem
 
-generateTaggedEvents :: Ctx -> Gen [TaggedEvent]
-generateTaggedEvents ctx = do
-    let bindings = extractBindings ctx 
-    genTaggedEventsForContext bindings
+import Generate
+import TypeCheck
+import Control.Monad.State
+import System.IO
+import Data.Either (isRight, isLeft)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 
-semElimTerm' :: ElimTerm -> Stream TaggedEvent -> Stream Event
-semElimTerm' a (S sf) = S (semElimTerm a sf)
+-- Number of terms to generate for testing
+testCount :: Int
+testCount = 10000
 
-exactSemSpec :: String -> Ctx -> Term -> SpecWith ()
-exactSemSpec s ctx tm = it s $ do
-    taggedEvents <- generate $ generateTaggedEvents ctx
-    
-    putStrLn $ "Generated Tagged Events: " ++ show taggedEvents
-    
-    let eltm = inlineElims tm
-    
-    let evaluatedEvents = sToList (semElimTerm' eltm (sFromList taggedEvents))
-    
-    let expectedEvents = List.Sem.bigStepTerm tm taggedEvents
-    
-    putStrLn $ "Evaluated Events: " ++ show evaluatedEvents
-    putStrLn $ "Expected Events: " ++ show expectedEvents
-    
-    evaluatedEvents `shouldBe` expectedEvents
-
-data ErrorCount = ErrorCount {
-    orderViolations   :: Int,
-    typeMismatches    :: Int,
-    lookupFailures    :: Int,
-    notImplemented    :: Int,
-    hole              :: Int
+-- Data to track statistics
+data Stats = Stats {
+    totalTerms :: Int,
+    successfulChecks :: Int,
+    errorCounts :: Map Error Int
 } deriving (Show)
 
-categorizeError :: Error -> ErrorCount -> ErrorCount
-categorizeError (TypeMismatch) counts = counts { typeMismatches = typeMismatches counts + 1 }
-categorizeError (OrderViolation _ _ _) counts     = counts { orderViolations = orderViolations counts + 1 }
-categorizeError (LookupFailed _) counts   = counts { lookupFailures = lookupFailures counts + 1 }
-categorizeError (NotImplemented _) counts = counts { notImplemented = notImplemented counts + 1 }
+-- Initialize empty stats
+emptyStats :: Stats
+emptyStats = Stats 0 0 Map.empty
 
-initialErrorCount :: ErrorCount
-initialErrorCount = ErrorCount 0 0 0 0 0
+-- Update stats based on the result of a type check
+updateStats :: Stats -> Either Error (Ty, PO.Pairs) -> Stats
+updateStats stats result = 
+    let total = totalTerms stats + 1
+    in case result of
+        Right _ -> stats { totalTerms = total, successfulChecks = successfulChecks stats + 1 }
+        Left err -> stats {
+            totalTerms = total,
+            errorCounts = Map.insertWith (+) err 1 (errorCounts stats)
+        }
 
-prop_check_term :: Gen (Either (Error, Term, Ty, Ty, Ctx) (PO.Pairs, Term, Ty, Ty, Ctx))
-prop_check_term = do
-  ((term, inferredTy), (_, ctx)) <- genTerm' Nothing
-  return $ case check ctx term inferredTy of
-    Right (ty', pairs) -> Right (pairs, term, TyEps, inferredTy, ctx)
-    Left err           -> Left (err, term, TyEps, inferredTy, ctx)
+-- Generate and type check a term, updating the stats
+testTerm :: Stats -> IO Stats
+testTerm stats = do
+    -- Generate a random term and type pair
+    genResult <- generate $ genTerm' Nothing
+    let ((term, ty), (_, ctx)) = genResult
 
-runAndReport :: IO ()
-runAndReport = do
-  results <- generate (replicateM 100000 prop_check_term)
+    -- Type check the generated term
+    let checkResult = check ctx term ty
 
-  (successes, errorCounts, _, failuresList) <- foldM categorizeResult (0, initialErrorCount, [], []) results
+    -- Update and return the stats
+    return $ updateStats stats checkResult
 
-  let numFailed = 100000 - successes
+-- Run the test harness and print the results
+runTests :: Int -> Stats -> IO Stats
+runTests 0 stats = return stats
+runTests n stats = do
+    updatedStats <- testTerm stats
+    runTests (n - 1) updatedStats
 
-  putStrLn "\nFailed Term's and Their Errors:"
+-- Print statistics about the test run
+printStats :: Stats -> IO ()
+printStats stats = do
+    let total = totalTerms stats
+    let successful = successfulChecks stats
+    let failures = total - successful
 
-  putStrLn $ "\nTotal terms generated: " ++ show 100000
-  putStrLn $ "Successful type checks: " ++ show successes
-  putStrLn $ "Failed type checks: " ++ show numFailed
-  putStrLn $ "Success rate: " ++ show (fromIntegral successes / 100000 * 100) ++ "%"
-  putStrLn $ "Failure rate: " ++ show (fromIntegral numFailed / 100000 * 100) ++ "%"
+    putStrLn $ "Total terms generated: " ++ show total
+    putStrLn $ "Successfully type checked: " ++ show successful
+    putStrLn $ "Failed to type check: " ++ show failures
 
-  putStrLn "\nError breakdown:"
-  putStrLn $ "Order Violations: " ++ show (orderViolations errorCounts)
-  putStrLn $ "Type Mismatches: " ++ show (typeMismatches errorCounts)
-  putStrLn $ "Lookup Failures: " ++ show (lookupFailures errorCounts)
-  putStrLn $ "Not Implemented Errors: " ++ show (notImplemented errorCounts)
-
-categorizeResult :: (Int, ErrorCount, [(PO.Pairs, Term, Ty, Ty, Ctx)], [(Error, Term, Ty, Ty, Ctx)]) 
-                 -> Either (Error, Term, Ty, Ty, Ctx) (PO.Pairs, Term, Ty, Ty, Ctx) 
-                 -> IO (Int, ErrorCount, [(PO.Pairs, Term, Ty, Ty, Ctx)], [(Error, Term, Ty, Ty, Ctx)])
-categorizeResult (successes, counts, successesList, failuresList) (Right (po, term, originalTy, inferredTy, ctx)) = do
-  putStrLn "\nTerm passed type checking:"
-  putStrLn $ "Term': " ++ show term
-  putStrLn $ "Inferred Type: " ++ show inferredTy
-  putStrLn $ "Context: " ++ show ctx
-
-  let taggedEventsGen = generateTaggedEvents ctx 
-  taggedEvents <- generate taggedEventsGen
-
-  putStrLn $ "Generated Tagged Events: " ++ show taggedEvents
-
-  let eltm = inlineElims term
-  let evaluatedEvents = sToList (semElimTerm' eltm (sFromList taggedEvents))
-  let expectedEvents = List.Sem.bigStepTerm term taggedEvents
-
-  putStrLn $ "Evaluated Events: " ++ show evaluatedEvents
-  putStrLn $ "Expected Events: " ++ show expectedEvents
-
-  return (successes + 1, counts, (po, term, originalTy, inferredTy, ctx) : successesList, failuresList)
-
-categorizeResult (successes, counts, successesList, failuresList) (Left (err, term, originalTy, inferredTy, ctx)) = do
-  putStrLn "----------------------------"
-  putStrLn $ "Generated Term': " ++ show term
-  putStrLn $ "Inferred Type: " ++ show inferredTy
-  putStrLn $ "Context: " ++ show ctx
-  putStrLn $ "Error: " ++ show err
-
-  return (successes, categorizeError err counts, successesList, (err, term, originalTy, inferredTy, ctx) : failuresList)
+    -- Print out the error statistics
+    putStrLn "Error breakdown:"
+    mapM_ (\(err, count) -> putStrLn $ show err ++ ": " ++ show count) (Map.toList $ errorCounts stats)
 
 main :: IO ()
-main = runAndReport
+main = do
+    putStrLn $ "Running " ++ show testCount ++ " tests..."
+    finalStats <- runTests testCount emptyStats
+    printStats(finalStats)

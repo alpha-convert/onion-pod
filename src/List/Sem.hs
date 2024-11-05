@@ -71,8 +71,7 @@ eval (StarCase xs e y ys e') m =
     case M.lookup xs m of
         Just (InlVal EpsVal) -> eval e m
         Just (InrVal (PairVal v1 v2)) -> eval e' (M.insert y v1 (M.insert ys v2 m))
-eval (Let x t e e') m = eval e' (M.insert x (eval e m) m)
-
+eval (Let x _ e e') m = eval e' (M.insert x (eval e m) m)
 eval (Fix _) _ = error "unimplemented."
 eval Rec _ = error "unimplemented."
 
