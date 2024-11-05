@@ -60,8 +60,8 @@ updateStats stats result =
 testTerm :: Stats -> IO Stats
 testTerm stats = do
     -- Generate a random term and type pair
-    genResult <- generate $ genTerm' Nothing
-    let ((term, ty), (_, ctx)) = genResult
+    genResult <- generate $ genTerm Nothing
+    let ((term, ty), (_, ctx, ctx')) = genResult
 
     -- Type check the generated term
     let checkResult = check ctx term ty

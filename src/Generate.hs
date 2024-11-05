@@ -48,11 +48,11 @@ genTy = sized go
                      , (1, return TyEps)                       
                      , (4, return TyInt)]                               
 
-fresh :: StateT (Int, Ctx) Gen String
+fresh :: StateT (Int, Ctx, [String]) Gen String
 fresh = do
-    (n, ctx) <- get
+    (n, ctx, ctx') <- get
     let x = "x_" ++ show (n + 1)
-    put (n + 1, ctx)
+    put (n + 1, ctx, ctx')
     return x
 
 safeConcat :: Ctx -> Ctx -> Ctx
@@ -70,11 +70,11 @@ safeConcat ctx1 ctx2 =
     then ctx1 ++ ctx2
     else error $ "Duplicate bindings found: " ++ show duplicates
 
-replaceElement :: Ctx -> String -> StateT (Int, Ctx) Gen ()
+replaceElement :: Ctx -> String -> StateT (Int, Ctx, [String]) Gen ()
 replaceElement ctx' x = do
-  (n, ctx) <- get
+  (n, ctx, extendedCtx) <- get
   let combinedCtx = replaceElement' ctx x ctx'
-  put (n, combinedCtx)
+  put (n, combinedCtx, extendedCtx)
 
 replaceElement' :: Ctx -> String -> Ctx -> Ctx
 replaceElement' ctx x ctx' =
@@ -98,39 +98,39 @@ lookup' (Pair k1 v1 k2 v2 : rest) x
     | k2 == x = Right (v2, PO.singleton (k2, k2)) 
     | otherwise = lookup' rest x
 
-bind :: Ty -> StateT (Int, Ctx) Gen String
+bind :: Ty -> StateT (Int, Ctx, [String]) Gen String
 bind s = do
   x <- fresh
   add (Atom x s)
   return x
 
-replace :: Ctx -> StateT (Int, Ctx) Gen ()
+replace :: Ctx -> StateT (Int, Ctx, [String]) Gen ()
 replace ctx' = do
-  (n, _) <- get
-  put (n, ctx')
+  (n, _, ctx'') <- get
+  put (n, ctx', ctx'')
 
-add :: Binding -> StateT (Int, Ctx) Gen ()
+add :: Binding -> StateT (Int, Ctx, [String]) Gen ()
 add el = do
-  (n, ctx) <- get
-  put (n, safeConcat ctx [el])
+  (n, ctx, ctx') <- get
+  put (n, safeConcat ctx [el], ctx')
 
-split :: StateT (Int, Ctx) Gen (Ctx, Ctx)
+split :: StateT (Int, Ctx, [String]) Gen (Ctx, Ctx)
 split = do
-  (_, ctx) <- get
+  (_, ctx, _) <- get
   n <- ST.lift $ choose (0, length ctx)
   let ctx0 = take n ctx
   let ctx1 = drop n ctx
   return (ctx0, ctx1)
 
-splitAndInsert :: Ctx -> StateT (Int, Ctx) Gen ()
+splitAndInsert :: Ctx -> StateT (Int, Ctx, [String]) Gen ()
 splitAndInsert ctx = do
   (ctx0, ctx1) <- split
   replace $ safeConcat (safeConcat ctx0 ctx) ctx1
 
 -- When we've hit 0, generate some concrete type, with no holes.
-leaf :: StateT (Int, Ctx) Gen (Term, Ty)
+leaf :: StateT (Int, Ctx, [String]) Gen (Term, Ty)
 leaf = do
-  (_, ctx) <- get
+  (_, ctx, ctx') <- get
   -- Get the current list of bindings.
   let ctxList = extractBindings ctx
   -- If the context is empty, we can create a new binding in it, or we can return an
@@ -148,14 +148,26 @@ leaf = do
       return (Var x s, s)
 
 leftOrRight :: Gen LR
-leftOrRight = do
-  choice <- elements [L, R]
-  return choice
+leftOrRight = do elements [L, R]
 
-genTerm' :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx))
-genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
+dequeue :: StateT (Int, Ctx, [String]) Gen (Maybe String)
+dequeue = do
+  (n, ctx, ctx') <- get
+  case ctx' of
+    []     -> return Nothing         
+    (x:xs) -> do
+      put (n, ctx, xs)               
+      return (Just x)               
+
+enqueue :: String -> StateT (Int, Ctx, [String]) Gen ()
+enqueue x = do
+  (n, ctx, ctx') <- get 
+  put (n, ctx, ctx' ++ [x])
+
+genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx, [String]))
+genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
   where
-    lCases :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
+    lCases :: Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     lCases r n = do
         choice <- ST.lift $ elements [1..4]
         case choice of
@@ -205,7 +217,7 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
 
             replace delta
             (e, s) <- go Nothing R (n `div` 2)
-            (_, delta') <- get
+            (_, delta', _) <- get
 
             replace (safeConcat (safeConcat gamma0 [Atom x s]) gamma1)
             (e', r) <- go (Just r) R (n `div` 2)
@@ -213,7 +225,7 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
             replaceElement delta' x
             return (Let x s e e', r)
           _ -> undefined
-    go :: Maybe Ty -> LR -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
+    go :: Maybe Ty -> LR -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     go (Just TyEps) _ _ = return (EpsR, TyEps)
     go (Just TyInt) _ _ = do
       tm <- IntR <$> ST.lift arbitrary
@@ -223,15 +235,15 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
         x <- fresh
         add (Atom x r)
         return (Var x r, r)
-    go (Just r) L n = lCases r (n `div` 2)
+    go (Just r) L n = lCases r (n - 1)
     go (Just (TyCat s t)) R n = do
       (gamma, delta) <- split
       replace gamma
       (e1, _) <- go (Just s) R (n `div` 2)
-      (_, gamma') <- get
+      (_, gamma', _) <- get
       replace delta
       (e2, _) <- go (Just t) R (n `div` 2)
-      (_, delta') <- get
+      (_, delta', _) <- get
       replace (safeConcat gamma' delta')
       return (CatR e1 e2, TyCat s t)
     go (Just (TyPlus s t)) R n = do
@@ -242,7 +254,8 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
     go Nothing _ n = do
       choice <- ST.lift $ oneof [
         return HCatR, 
-        return HCatL, 
+        return HCatL,
+        return HPlusR,
         return HPlusL, 
         return HLet,
         return HVar]
@@ -251,10 +264,10 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
           (gamma, delta) <- split
           replace gamma
           (x, s) <- go Nothing NA (n `div` 4)
-          (_, gamma') <- get
+          (_, gamma', ctx') <- get
           replace delta
           (y, t) <- go Nothing NA (n `div` 4)
-          (_, delta') <- get
+          (_, delta', ctx') <- get
           replace (safeConcat gamma' delta')
           return (CatR x y, TyCat s t)
         HCatL -> do
@@ -299,11 +312,11 @@ genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
           replace delta
 
           (e, s) <- go Nothing NA (n `div` 4)
-          (_, delta') <- get
+          (_, delta', _) <- get
 
           x <- fresh
           replace (safeConcat (safeConcat gamma' [Atom x s]) gamma'')
-
+          enqueue x
           (e', t) <- go Nothing NA (n `div` 4)
           replaceElement delta' x
 
