@@ -1,0 +1,46 @@
+
+==================== Tidy Core ====================
+2024-09-26 20:58:11.700536 UTC
+
+Result size of Tidy Core
+  = {terms: 21, types: 12, coercions: 0, joins: 0/0}
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+$trModule1_rNA :: ghc-prim:GHC.Prim.Addr#
+[GblId, Unf=OtherCon []]
+$trModule1_rNA = "main"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+$trModule2_rNB :: ghc-prim:GHC.Types.TrName
+[GblId, Unf=OtherCon []]
+$trModule2_rNB = ghc-prim:GHC.Types.TrNameS $trModule1_rNA
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+$trModule3_rNC :: ghc-prim:GHC.Prim.Addr#
+[GblId, Unf=OtherCon []]
+$trModule3_rNC = "Main"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+$trModule4_rND :: ghc-prim:GHC.Types.TrName
+[GblId, Unf=OtherCon []]
+$trModule4_rND = ghc-prim:GHC.Types.TrNameS $trModule3_rNC
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+Main.$trModule :: ghc-prim:GHC.Types.Module
+[GblId, Unf=OtherCon []]
+Main.$trModule
+  = ghc-prim:GHC.Types.Module $trModule2_rNB $trModule4_rND
+
+-- RHS size: {terms: 3, types: 2, coercions: 0, joins: 0/0}
+main :: IO ()
+[GblId]
+main
+  = break<0>()
+    return @IO GHC.Base.$fMonadIO @() ghc-prim:GHC.Tuple.Prim.()
+
+-- RHS size: {terms: 2, types: 1, coercions: 0, joins: 0/0}
+:Main.main :: IO ()
+[GblId]
+:Main.main = GHC.TopHandler.runMainIO @() main
+
+

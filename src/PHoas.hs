@@ -125,6 +125,8 @@ toTerm e = evalState (go e (typeRep @a)) 0
 data TypedTerm where
     Pack :: forall a. StreamTyped a => TypeRep StreamTyped a -> Term StreamTyped a -> TypedTerm
 
+-- Given a term, a map from its free variables to types, and its type, return
+-- a "typedterm" --  exists some a, such that you hae a term of that type.
 fromTerm :: Raw.Term -> M.Map String StreamTypes.Ty -> StreamTypes.Ty -> TypedTerm
 fromTerm e m t = 
     unTypeRep t & \(PackTy tr) ->

@@ -1,0 +1,34 @@
+
+==================== Tidy Core ====================
+2024-09-26 20:58:19.261389 UTC
+
+Result size of Tidy Core
+  = {terms: 14, types: 5, coercions: 0, joins: 0/0}
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+$trModule1_r7il :: ghc-prim:GHC.Prim.Addr#
+[GblId, Unf=OtherCon []]
+$trModule1_r7il = "interactive"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+$trModule2_r7im :: ghc-prim:GHC.Types.TrName
+[GblId, Unf=OtherCon []]
+$trModule2_r7im = ghc-prim:GHC.Types.TrNameS $trModule1_r7il
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+$trModule3_r7in :: ghc-prim:GHC.Prim.Addr#
+[GblId, Unf=OtherCon []]
+$trModule3_r7in = "Ghci1"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+$trModule4_r7io :: ghc-prim:GHC.Types.TrName
+[GblId, Unf=OtherCon []]
+$trModule4_r7io = ghc-prim:GHC.Types.TrNameS $trModule3_r7in
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+interactive:Ghci1.$trModule :: ghc-prim:GHC.Types.Module
+[GblId, Unf=OtherCon []]
+interactive:Ghci1.$trModule
+  = ghc-prim:GHC.Types.Module $trModule2_r7im $trModule4_r7io
+
+

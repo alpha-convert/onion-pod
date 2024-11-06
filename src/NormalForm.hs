@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module NormalForm (normalize) where
+module NormalForm where
 
 import Types
 import PHoas
