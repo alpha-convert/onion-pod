@@ -1,0 +1,6 @@
+packages: .
+
+source-repository-package
+  type: git
+  location: https://github.com/tyche-pbt/tyche-quickcheck
+  tag: main

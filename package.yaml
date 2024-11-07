@@ -30,6 +30,7 @@ dependencies:
 - criterion
 - constraints
 - some
+- tyche  # Added tyche as a project-wide dependency
 
 ghc-options:
 - -Wall
@@ -44,6 +45,8 @@ ghc-options:
 
 library:
   source-dirs: src
+  dependencies:
+  - tyche  # Ensure tyche is also listed in the library dependencies
 
 executables:
   Delta-Compiler-exe:
@@ -55,6 +58,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - Delta-Compiler
+    - tyche  # Added tyche as a dependency for the executable if needed
 
 tests:
   Delta-Compiler-test:
@@ -67,3 +71,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - Delta-Compiler
+    - tyche  # Added tyche as a dependency for the test suite

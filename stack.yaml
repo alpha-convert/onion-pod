@@ -24,6 +24,7 @@ resolver:
 #  - git: https://github.com/tyche-pbt/tyche-quickcheck
 #    commit: f98cc0490595b9e838e430da1d70911c76c84d0e
 
+
 # User packages to be built.
 # Various formats can be used as shown in the example below.
 #
@@ -35,6 +36,8 @@ resolver:
 #   - wai
 packages:
 - .
+- tyche-quickcheck
+
 # Dependency packages to be pulled from upstream that are not in the resolver.
 # These entries can reference officially published versions as well as
 # forks / in-progress versions pinned to a git hash. For example:
