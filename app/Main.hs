@@ -1,8 +1,13 @@
 
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveLift #-}
 
 module Main where
+
+import Test.QuickCheck
+import qualified Test.Tyche as Tyche
+import Term
 
 import Test.QuickCheck
 import ElimTerm
@@ -29,7 +34,49 @@ import System.IO
 import Data.Either (isRight, isLeft)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+{-
+getConstructor :: Term -> String
+getConstructor EpsR = "EpsR"
+getConstructor (Var _ _) = "Var"
+getConstructor (IntR _) = "IntR"
+getConstructor (CatR _ _) = "CatR"
+getConstructor (CatL _ _ _ _) = "CatL"
+getConstructor (InL _ _) = "InL"
+getConstructor (InR _ _) = "InR"
+getConstructor (PlusCase _ _ _ _ _) = "PlusCase"
+getConstructor (Nil _) = "Nil"
+getConstructor (Cons _ _) = "Cons"
+getConstructor (StarCase _ _ _ _ _) = "StarCase"
+getConstructor (Let _ _ _ _) = "Let"
+getConstructor _ = error ""
 
+termDepth :: Term -> Int
+termDepth EpsR = 1
+termDepth (Var _ _) = 1
+termDepth (IntR _) = 1
+termDepth (CatR e1 e2) = 1 + max (termDepth e1) (termDepth e2)
+termDepth (CatL _ _ _ e) = 1 + termDepth e
+termDepth (InL e _) = 1 + termDepth e
+termDepth (InR e _) = 1 + termDepth e
+termDepth (PlusCase _ _ e1 _ e2) = 1 + max (termDepth e1) (termDepth e2)
+termDepth (Nil _) = 1
+termDepth (Cons e1 e2) = 1 + max (termDepth e1) (termDepth e2)
+termDepth (StarCase _ e1 _ _ e2) = 1 + max (termDepth e1) (termDepth e2)
+termDepth (Let _ _ e1 e2) = 1 + max (termDepth e1) (termDepth e2)
+termDepth _ = error ""
+
+prop_categorizeConstructor :: Property
+prop_categorizeConstructor =
+    Tyche.visualize "prop_categorizeConstructor" $
+        forAll (genTerm Nothing) $ \((term, ty), (_, ctx, _)) ->
+            label ("constructor:" ++ getConstructor term) $
+                case check ctx term ty of
+                    Right _  -> True
+                    Left err -> False
+-}
+main :: IO ()
+main = return ()
+{-
 -- Number of terms to generate for testing
 testCount :: Int
 testCount = 10000
@@ -96,3 +143,4 @@ main = do
     putStrLn $ "Running " ++ show testCount ++ " tests..."
     finalStats <- runTests testCount emptyStats
     printStats(finalStats)
+-}

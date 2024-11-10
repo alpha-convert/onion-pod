@@ -3,12 +3,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveLift #-}
 
-module Spec where
+module Main where
+import Text.Printf (printf)
 
 import Test.QuickCheck
 import qualified Test.Tyche as Tyche
 import Term
-
+import Data.List (nub, intersect)
 import Test.QuickCheck
 import ElimTerm
 import Term
@@ -50,20 +51,52 @@ getConstructor (StarCase _ _ _ _ _) = "StarCase"
 getConstructor (Let _ _ _ _) = "Let"
 getConstructor _ = error ""
 
-termDepth :: Term -> Int
-termDepth EpsR = 1
-termDepth (Var _ _) = 1
-termDepth (IntR _) = 1
-termDepth (CatR e1 e2) = 1 + max (termDepth e1) (termDepth e2)
-termDepth (CatL _ _ _ e) = 1 + termDepth e
-termDepth (InL e _) = 1 + termDepth e
-termDepth (InR e _) = 1 + termDepth e
-termDepth (PlusCase _ _ e1 _ e2) = 1 + max (termDepth e1) (termDepth e2)
-termDepth (Nil _) = 1
-termDepth (Cons e1 e2) = 1 + max (termDepth e1) (termDepth e2)
-termDepth (StarCase _ e1 _ _ e2) = 1 + max (termDepth e1) (termDepth e2)
-termDepth (Let _ _ e1 e2) = 1 + max (termDepth e1) (termDepth e2)
-termDepth _ = error ""
+depth :: Term -> Int
+depth EpsR = 1
+depth (Var _ _) = 1
+depth (IntR _) = 1
+depth (CatR e1 e2) = 1 + max (depth e1) (depth e2)
+depth (CatL _ _ _ e) = 1 + depth e
+depth (InL e _) = 1 + depth e
+depth (InR e _) = 1 + depth e
+depth (PlusCase _ _ e1 _ e2) = 1 + max (depth e1) (depth e2)
+depth (Nil _) = 1
+depth (Cons e1 e2) = 1 + max (depth e1) (depth e2)
+depth (StarCase _ e1 _ _ e2) = 1 + max (depth e1) (depth e2)
+depth (Let _ _ e1 e2) = 1 + max (depth e1) (depth e2)
+depth _ = error ""
+
+extractVarsFromTerm :: Term -> [String]
+extractVarsFromTerm EpsR = []
+extractVarsFromTerm (Var x _) = [x]
+extractVarsFromTerm (IntR _) = []
+extractVarsFromTerm (CatR e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (CatL _ _ _ e) = extractVarsFromTerm e
+extractVarsFromTerm (InL e _) = extractVarsFromTerm e
+extractVarsFromTerm (InR e _) = extractVarsFromTerm e
+extractVarsFromTerm (PlusCase _ _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (Nil _) = []
+extractVarsFromTerm (Cons e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (StarCase _ e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (Let _ _ e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm _ = error ""
+
+extractVarsFromCtx :: Ctx -> [String]
+extractVarsFromCtx ctx = nub [x | Atom x _ <- ctx] ++ [x1 | Pair x1 _ x2 _ <- ctx] ++ [x2 | Pair x1 _ x2 _ <- ctx]
+
+ctxUsed :: Term -> Ctx -> [String]
+ctxUsed term ctx =
+    let termVars = extractVarsFromTerm term in
+    let ctxVars = extractVarsFromCtx ctx in
+    termVars `intersect` ctxVars
+
+truncate :: Float -> Float
+truncate num = fromIntegral (floor (num * 100)) / 100
+
+calculateProportion :: [String] -> [String] -> Int
+calculateProportion termVars ctxVars
+    | null ctxVars = 100
+    | otherwise = round $ (fromIntegral (length termVars) / fromIntegral (length ctxVars)) * 100
 
 prop_categorizeConstructor :: Property
 prop_categorizeConstructor =
@@ -73,6 +106,31 @@ prop_categorizeConstructor =
                 case check ctx term ty of
                     Right _  -> True
                     Left err -> False
+
+prop_depth :: Property
+prop_depth =
+    Tyche.visualize "prop_depth" $
+        forAll (genTerm Nothing) $ \((term, ty), (_, ctx, _)) ->
+            label ("depth:" ++ show (depth term)) $
+                case check ctx term ty of
+                    Right _  -> True
+                    Left err -> False
+
+prop_usedVars :: Property
+prop_usedVars =
+    Tyche.visualize "prop_usedVars" $
+        forAll (genTerm Nothing) $ \((term, ty), (_, ctx, _)) ->
+            let termVars = ctxUsed term ctx
+                ctxVars = extractVarsFromCtx ctx
+                proportion = calculateProportion termVars ctxVars
+            in label ("used_vars:" ++ show (proportion)) $
+                label ("depth:" ++ show (depth term)) $
+                label ("constructor:" ++ getConstructor term) $
+                case check ctx term ty of
+                    Right _  -> True
+                    Left err -> False
+                    
+return []
 
 main :: IO Bool
 main = $quickCheckAll

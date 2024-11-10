@@ -94,6 +94,7 @@ test-suite Delta-Compiler-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Main
       Paths_Delta_Compiler
   autogen-modules:
       Paths_Delta_Compiler
