@@ -17,9 +17,11 @@ import Control.Monad (replicateM)
 import Language.Haskell.TH.Syntax
 import List.Sem
 import GHC.Arr (lessSafeIndex)
+import Debug.Trace (trace)
+
 
 data Binding = Atom String Ty | Pair String Ty String Ty deriving (Eq,Ord,Show,Lift)
-data LR = L | R | NA
+data LR = L | R | NA deriving (Eq, Ord, Show)
 
 data PossibleTerm's = HCatR | HPlusR | HCatL | HPlusL | HLet | HVar | HInt | HEps | HNil | HCons | HStarL
 
@@ -171,28 +173,28 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
     cons t n = do
       ty <- case t of
               Just given -> return given
-              Nothing -> ST.lift genTy -- Generate a type if t is Nothing
-      do
-        (gamma, delta) <- split
-        replace gamma
-        (e, s) <- go (Just ty) R (n - 1)
-        (_, gamma', _) <- get
-        replace (safeConcat gamma' delta)
-        return (Cons e (Nil (TyStar s)), TyStar s)
-    {-
+              Nothing -> ST.lift genTy
+      
+      let initialAcc = Nil (TyStar ty)
+
       let loop acc curN = 
             if curN <= 0
             then return acc
             else do
-              (gamma, delta) <- split
-              replace gamma
-              (e, s) <- go (Just ty) NA (curN - 1)
-              (curN, gamma', _) <- get
-              replace (safeConcat gamma' delta)
-              loop (Cons e acc) (curN - 1)
-      result <- loop (Nil (TyStar ty)) n
+              choice <- ST.lift $ frequency [(3, return True), (1, return False)]
+              choice' <- ST.lift $ frequency [(2, return R), (1, return L)]
+              if not choice
+              then return acc -- Break early by returning the accumulated term.
+              else do
+                (gamma, delta) <- split
+                replace gamma
+                (e, s) <- go (Just ty) choice' (curN `div` 2)
+                (_, gamma', _) <- get
+                replace (safeConcat gamma' delta)
+                loop (Cons e acc) (curN - 1)
+      
+      result <- loop initialAcc (n - 1)
       return (result, TyStar ty)
-    -}
     nil :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     nil t n = do
       ty <- case t of
@@ -383,10 +385,10 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       return (Var x (TyPlus s t), TyPlus s t)
     go (Just (TyStar s)) R n = do
       choice <- ST.lift $ frequency [
-        -- (5, return HCons),
+        (5, return HCons),
         (2, return HNil)]
       case choice of
-        HCons -> cons (Just (TyStar s)) (n - 1)
+        HCons -> cons (Just s) (n - 1)
         HNil -> nil (Just (TyStar s)) (n - 1)
         _ -> error ""
     go Nothing _ 0 = do leaf
@@ -394,10 +396,10 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       choice <- ST.lift $ frequency
         [ (5, return HCatR),
           (5, return HCatL),
-          (5, return HPlusR),
+          (7, return HPlusR),
           (5, return HPlusL),
           (2, return HNil),
-          -- (5, return HCons),
+          (5, return HCons),
           (5, return HStarL),
           (5, return HLet),
           (5, return HVar),
@@ -418,238 +420,10 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         HNil -> nil Nothing (n - 1)
         HCons -> cons Nothing (n - 1)
         HStarL -> starCase Nothing (n - 1)
-    go _ _ _ = undefined
-
-{-
-genTerm' :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx))
-genTerm' maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, []))
-  where
-    {-
-    lCases :: Ty -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
-    lCases r n = do
-        choice <- ST.lift $ elements [1..5]
-        case choice of
-          1 -> do
-            x <- fresh
-            y <- fresh
-            z <- fresh
-
-            s <- ST.lift $ genTy
-            t <- ST.lift $ genTy
-
-            splitAndInsert [Atom x s]
-            lr <- ST.lift $ leftOrRight
-            (e1, _) <- go (Just r) lr (n `div` 2)
-          
-            replaceElement [Atom y t] x
-          
-            lr' <- ST.lift $ leftOrRight
-            (e2, _) <- go (Just r) lr' (n `div` 2)
-          
-            replaceElement [Atom z (TyPlus s t)] y
-            return (PlusCase z x e1 y e2, t)
-          2 -> do
-            lr <- ST.lift $ leftOrRight
-            (_, s) <- go (Just r) lr (n `div` 2)
-            x <- fresh
-            add (Atom x s)
-            return (Var x s, s)
-          3 -> do
-            z <- fresh
-            x <- fresh
-            xs <- fresh
-
-            lr <- ST.lift $ leftOrRight
-            (e, _) <- go (Just r) lr (n `div` 2)
-            s <- ST.lift $ genTy
-
-            splitAndInsert [Pair x s xs (TyStar s)]
-            lr' <- ST.lift $ leftOrRight
-            (es, _) <- go (Just r) lr' (n `div` 2)
-
-            replaceElement [Atom z (TyStar s)] x
-
-            return (StarCase z e x xs es, r)
-          4 -> do
-            x <- fresh
-            y <- fresh
-            z <- fresh
-
-            s <- ST.lift $ genTy
-            t <- ST.lift $ genTy
-
-            splitAndInsert [Pair x s y t]
-            lr <- ST.lift $ leftOrRight
-            (e, _) <- go (Just r) lr (n `div` 2)
-
-            replaceElement [Atom z (TyCat s t)] x
-            return (CatL x y z e, r)
-          5 -> do
-            x <- fresh
-
-            (gamma0, temp) <- split
-            replace temp
-            (delta, gamma1) <- split
-
-            replace delta
-            (e, s) <- go Nothing R (n `div` 2)
-            (_, delta') <- get
-
-            replace (safeConcat (safeConcat gamma0 [Atom x s]) gamma1)
-            (e', r) <- go (Just r) R (n `div` 2)
-
-            replaceElement delta' x
-            return (Let x s e e', r)
-          _ -> undefined
-    -}
-    go :: Maybe Ty -> LR -> Int -> StateT (Int, Ctx) Gen (Term, Ty)
-    go (Just TyEps) _ _ = return (EpsR, TyEps)
-    go (Just TyInt) _ _ = do
-      tm <- IntR <$> ST.lift arbitrary
-      return (tm, TyInt)
-    go (Just r) L n = do
-      x <- fresh
-      add (Atom x r)
-      return (Var x r, r)
-    go (Just (TyStar s)) _ 0 = do
-      return (Nil (TyStar s), TyStar s)
-    go (Just (TyStar r)) R n = do
-      x <- fresh
-      add (Atom x (TyStar r))
-      return (Var x (TyStar r), TyStar r)
-      {-
-      do
-        (gamma, delta) <- split
-        replace gamma
-        (e, _) <- go (Just s) R (n + 1)
-        (_, gamma') <- get
-        replace (safeConcat gamma' delta)
-        return (Cons' e (Nil' (TyStar s)), TyStar s)
-      -}
-    go (Just (TyCat s t)) R n = do
-      (gamma, delta) <- split
-      replace gamma
-      (e1, _) <- go (Just s) R (n `div` 2)
-      (_, gamma') <- get
-      replace delta
-      (e2, _) <- go (Just t) R (n `div` 2)
-      (_, delta') <- get
-      replace (safeConcat gamma' delta')
-      return (CatR e1 e2, TyCat s t)
-    go (Just (TyPlus s t)) R n = do
-      x <- fresh
-      add (Atom x (TyPlus s t))
-      return (Var x (TyPlus s t), (TyPlus s t))
-      -- lCases (TyPlus s t) (n `div` 2)
-      {-
-      (e1, _) <- go (Just s) R (n + 1)
-      (e2, _) <- go (Just t) R (n + 1)
-      ST.lift $ oneof
-         [return (InL' e1, TyPlus s t), return (InR' e2, TyPlus s t)]
-      -}
-    go (Just r) _ 0 = do
-        x <- fresh
-        add (Atom x r)
-        return (Var x r, r)
-    go Nothing _ 0 = do leaf
-    go Nothing _ n = do
-      choice <- ST.lift $ oneof [
-        return HCatR', 
-        return HCatL', 
-        -- return HPlusR, 
-        return HPlusL, 
-        return HLet',
-        -- return HStarR,
-        return HStarL,
-        return HVar']
-      case choice of
-        HCatR' -> do
-          (gamma, delta) <- split
-          replace gamma
-          (x, s) <- go Nothing NA (n `div` 4)
-          (_, gamma') <- get
-          replace delta
-          (y, t) <- go Nothing NA (n `div` 4)
-          (_, delta') <- get
-          replace (safeConcat gamma' delta')
-          return (CatR x y, TyCat s t)
-        HCatL' -> do
-          (_, s) <- go Nothing NA (n `div` 4)
-          (_, t) <- go Nothing NA (n `div` 4)
-
-          x <- fresh
-          y <- fresh
-
-          splitAndInsert [Pair x s y t]
-          (e, r) <- go Nothing NA (n `div` 4)
-
-          z <- fresh
-          replaceElement [Atom z (TyCat s t)] x
-          return (CatL x y z e, r)
-        HStarR -> do
-          (gamma, delta) <- split
-          replace gamma
-          (e, s) <- go Nothing NA (n `div` 4) 
-          (_, gamma') <- get
-          replace (safeConcat gamma' delta)
-          return (Cons e (Nil (TyStar s)), TyStar s)
-        HStarL -> do
-          (e, r) <- go Nothing NA (n `div` 4)
-          (_, s) <- go Nothing NA (n `div` 4)
-
-          x <- fresh
-          xs <- fresh
-          z <- fresh
-
-          splitAndInsert [Pair x s xs (TyStar s)]
-          lr <- ST.lift $ leftOrRight
-          (es, _) <- go (Just r) lr (n `div` 4)
-
-          replaceElement [Atom z (TyStar s)] x
-
-          return (StarCase z e x xs es, r)
-        HPlusR -> do
-          (e1, s) <- go Nothing NA (n `div` 4)
-          (e2, t) <- go Nothing NA (n `div` 4)
-          ST.lift $ oneof [return (InL e1 (TyPlus s t), TyPlus s t), return (InR e2 (TyPlus s t), TyPlus s t)]
-        HPlusL -> do
-          (_, s) <- go Nothing NA (n `div` 4)
-          (_, t) <- go Nothing NA (n `div` 4)
-
-          x <- fresh
-          y <- fresh
-
-          splitAndInsert [Atom x s]
-          
-          (e1, r1) <- go Nothing NA (n `div` 4)
-
-          replaceElement [Atom y t] x
-          lr <- ST.lift $ leftOrRight
-          (e2, _) <- go (Just r1) lr (n `div` 4)
-
-          z <- fresh
-          replaceElement [Atom z (TyPlus s t)] y
-          return (PlusCase z x e1 y e2, r1)
-        HLet' -> do
-          (gamma', temp) <- split
-          replace temp
-          (delta, gamma'') <- split
-          replace delta
-
-          (e, s) <- go Nothing NA (n `div` 4)
-          (_, delta') <- get
-
-          x <- fresh
-          replace (safeConcat (safeConcat gamma' [Atom x s]) gamma'')
-
-          (e', t) <- go Nothing NA (n `div` 4)
-          replaceElement delta' x
-
-          return (Let x s e e', t)
-        HVar' -> do
-          (_, s) <- go Nothing NA (n `div` 4)
-          x <- fresh
-          add (Atom x s)
-          return (Var x s, s)
-    go _ _ _ = undefined
--}
+    go maybeTy lr n = do
+      (curN, ctx, ctx') <- get
+      error $ trace ("Reached undefined case with parameters:\n" ++
+                    "maybeTy: " ++ show maybeTy ++ "\n" ++
+                    "LR: " ++ show lr ++ "\n" ++
+                    "n: " ++ show n ++ "\n" ++
+                    "State: " ++ show (curN, ctx, ctx')) "Unreachable code in go function"
