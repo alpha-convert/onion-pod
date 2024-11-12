@@ -118,7 +118,7 @@ prop_depth =
 
 prop_usedVars :: Property
 prop_usedVars =
-    Tyche.visualize "prop_usedVars" $
+    Tyche.visualize "prop_all" $
         forAll (genTerm Nothing) $ \((term, ty), (_, ctx, _)) ->
             let termVars = ctxUsed term ctx
                 ctxVars = extractVarsFromCtx ctx
@@ -126,6 +126,7 @@ prop_usedVars =
             in label ("used_vars:" ++ show (proportion)) $
                 label ("depth:" ++ show (depth term)) $
                 label ("constructor:" ++ getConstructor term) $
+                label ("ctx_size: " ++ show (length ctx)) $
                 case check ctx term ty of
                     Right _  -> True
                     Left err -> False
