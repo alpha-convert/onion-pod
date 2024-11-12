@@ -186,10 +186,10 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
               else do
                 (gamma, delta) <- split
                 replace gamma
-                (e, s) <- go (Just ty) choice' (curN `div` 2)
+                (e, s) <- go (Just ty) choice' (curN - 1)
                 (_, gamma', _) <- get
                 replace (safeConcat gamma' delta)
-                loop (Cons e acc) (curN - 1)
+                loop (Cons e acc) (n - 1)
       result <- loop initialAcc (n - 1)
       return (result, TyStar ty)
     nil :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)

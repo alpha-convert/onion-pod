@@ -74,10 +74,10 @@ extractVarsFromTerm (CatR e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFr
 extractVarsFromTerm (CatL _ _ _ e) = extractVarsFromTerm e
 extractVarsFromTerm (InL e _) = extractVarsFromTerm e
 extractVarsFromTerm (InR e _) = extractVarsFromTerm e
-extractVarsFromTerm (PlusCase _ _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (PlusCase x _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2 ++ [x]
 extractVarsFromTerm (Nil _) = []
 extractVarsFromTerm (Cons e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm (StarCase _ e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (StarCase x e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2 ++ [x]
 extractVarsFromTerm (Let _ _ e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
 extractVarsFromTerm _ = error ""
 
