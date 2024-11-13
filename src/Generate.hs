@@ -169,6 +169,21 @@ enqueue x = do
 genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx, [String]))
 genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
   where
+    useBound :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Maybe (Term, Ty))
+    useBound mty n = do
+      (n, ctx, extCtx) <- get
+      case extCtx of
+        [] -> return Nothing
+        (x:xs) -> do
+          let result = lookup' ctx x
+          either
+            (const $ return Nothing)
+            (\(s, _) -> case mty of
+               Nothing -> put (n, ctx, xs) >> return (Just (Var x s, s))
+               Just t -> if t == s
+                         then put (n, ctx, xs) >> return (Just (Var x s, s))
+                         else return Nothing)
+            result
     cons :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     cons t n = do
       ty <- case t of
@@ -179,13 +194,13 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
             if curN <= 0
             then return acc
             else do
-              choice <- ST.lift $ frequency [(3, return True), (1, return False)]
-              choice' <- ST.lift $ frequency [(2, return R), (1, return L)]
+              choice <- ST.lift $ frequency [(3, return True), (1, return False)]              
               if not choice
               then return acc -- Break early by returning the accumulated term.
               else do
                 (gamma, delta) <- split
                 replace gamma
+                choice' <- ST.lift $ frequency [(2, return R), (1, return L)]
                 (e, s) <- go (Just ty) choice' (curN - 1)
                 (_, gamma', _) <- get
                 replace (safeConcat gamma' delta)
@@ -218,28 +233,58 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       replaceElement [Atom z (TyStar s)] x
 
       return (StarCase z e x xs es, ty)
-    catR :: Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
-    catR n = do
+    catR :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
+    catR ty n = do
+      s <- case ty of
+        Just (TyCat s t) -> return (Just s)
+        Nothing -> return Nothing
+        _ -> error ""
+
+      t <- case ty of
+        Just (TyCat s t) -> return (Just t)
+        Nothing -> return Nothing
+        _ -> error ""
+
+      choiceS <- ST.lift $ frequency [(1, return L), (2, return R)]
+      choiceT <- ST.lift $ frequency [(1, return L), (2, return R)]
+
       (gamma, delta) <- split
       replace gamma
-      (x, s) <- go Nothing NA (n `div` 4)
+      (x, s) <- go s choiceS (n `div` 4)
       (_, gamma', _) <- get
       replace delta
-      (y, t) <- go Nothing NA (n `div` 4)
+      (y, t) <- go t choiceT (n `div` 4)
       (_, delta', _) <- get
       replace (safeConcat gamma' delta')
       return (CatR x y, TyCat s t)
-    plusR :: Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
-    plusR n = do
+    plusR :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
+    plusR ty n = do
+      s <- case ty of
+        Just (TyPlus s t) -> return (Just s)
+        Nothing -> return Nothing
+        _ -> error ""
+
+      t <- case ty of
+        Just (TyPlus s t) -> return (Just t)
+        Nothing -> return Nothing
+        _ -> error ""
+
+      choiceS <- ST.lift $ frequency [(1, return L), (2, return R)]
+      choiceT <- ST.lift $ frequency [(1, return L), (2, return R)]
+
       choice <- ST.lift $ oneof [return True, return False]
       case choice of
         True -> do
-          t <- ST.lift $ genTy
-          (e1, s) <- go Nothing NA (n `div` 4)
+          t <- case ty of
+              Just (TyPlus s t) -> return t
+              Nothing -> ST.lift $ genTy
+          (e1, s) <- go s choiceS (n `div` 4)
           return (InL e1 (TyPlus s t), TyPlus s t)
         False -> do
-          s <- ST.lift $ genTy
-          (e2, t) <- go Nothing NA (n `div` 4)
+          s <- case ty of
+              Just (TyPlus s t) -> return s
+              Nothing -> ST.lift $ genTy
+          (e2, t) <- go t choiceT (n `div` 4)
           return (InR e2 (TyPlus s t), TyPlus s t)
     var :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     var (Just r) _ = do
@@ -265,6 +310,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         (e, _) <- go (Just r) lr (n `div` 2)
 
         replaceElement [Atom z (TyCat s t)] x
+        enqueue z
         return (CatL x y z e, r)
     catL Nothing n = do
       s <- ST.lift $ genTy
@@ -272,12 +318,13 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
 
       x <- fresh
       y <- fresh
+      z <- fresh
 
       splitAndInsert [Pair x s y t]
-      (e, r) <- go Nothing NA (n `div` 4)
-
-      z <- fresh
+      -- (e, r) <- go Nothing NA (n `div` 4)
       replaceElement [Atom z (TyCat s t)] x
+      enqueue z
+      (e, r) <- go Nothing NA (n `div` 4) -- Is this OK?
       return (CatL x y z e, r)
     let' :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     let' r n = do
@@ -292,6 +339,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         (_, delta', _) <- get
 
         replace (safeConcat (safeConcat gamma0 [Atom x s]) gamma1)
+        enqueue x
         (e', r) <- go r R (n `div` 2)
 
         replaceElement delta' x
@@ -357,20 +405,8 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         add (Atom x r)
         return (Var x r, r)
     go (Just r) L n = lCases r (n - 1)
-    go (Just (TyCat s t)) R n = do
-      (gamma, delta) <- split
-      replace gamma
-      (e1, _) <- go (Just s) R (n `div` 2)
-      (_, gamma', _) <- get
-      replace delta
-      (e2, _) <- go (Just t) R (n `div` 2)
-      (_, delta', _) <- get
-      replace (safeConcat gamma' delta')
-      return (CatR e1 e2, TyCat s t)
-    go (Just (TyPlus s t)) R _ = do
-      x <- fresh
-      add (Atom x (TyPlus s t))
-      return (Var x (TyPlus s t), TyPlus s t)
+    go (Just (TyCat s t)) R n = catR (Just (TyCat s t)) (n - 1)
+    go (Just (TyPlus s t)) R n = plusR (Just (TyPlus s t)) (n - 1)
     go (Just (TyStar s)) R n = do
       choice <- ST.lift $ frequency [
         (5, return HCons),
@@ -395,9 +431,9 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
           (2, return HEps)
         ]
       case choice of
-        HCatR -> catR (n - 1)
+        HCatR -> catR Nothing (n - 1)
         HCatL -> catL Nothing (n - 1)
-        HPlusR -> plusR (n - 1)
+        HPlusR -> plusR Nothing (n - 1)
         HPlusL -> plus Nothing (n - 1)
         HLet -> let' Nothing (n - 1)
         HVar -> var Nothing (n - 1)
