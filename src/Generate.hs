@@ -295,7 +295,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
           either
             (const $ return Nothing)
             (\(s, _) -> case mty of
-               Nothing -> put (n, ctx, xs) >> return (Just (Var x s, s))
+               Nothing -> return (Just (Var x s, s))
                Just t -> if t == s
                          then put (cnt, ctx, xs) >> return (Just (Var x s, s))
                          else return Nothing)
@@ -392,13 +392,17 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
           (e2, t) <- go (Just t) choiceT (n `div` 2)
           return (InR e2 (TyPlus s t), TyPlus s t)
     var :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
-    var ty _ = do
-      x <- fresh
-      s <- case ty of
-        Nothing -> ST.lift $ genTy
-        (Just s) -> return s
-      add (Atom x s)
-      return (Var x s, s)
+    var ty n = do
+      boundVar <- useBound ty n
+      case boundVar of
+        Just (term, termTy) -> return (term, termTy)
+        Nothing -> do
+          x <- fresh
+          s <- case ty of
+            Nothing -> ST.lift genTy
+            Just s  -> return s
+          add (Atom x s)
+          return (Var x s, s)
     catL :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     catL ty n = do
       s <- ST.lift $ genTy
@@ -499,6 +503,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         _ -> error ""
     go Nothing _ 0 = do leaf
     go Nothing _ n = do
+      (_, _, extCtx) <- get
       choice <- ST.lift $ frequency
         [ (5, return HCatR),
           (5, return HCatL),
@@ -508,7 +513,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
           (5, return HCons),
           (5, return HStarL),
           (5, return HLet),
-          (5, return HVar),
+          (15 * length extCtx + 5, return HVar),
           (2, return HInt),
           (2, return HEps)
         ]
