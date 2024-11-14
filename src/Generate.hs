@@ -18,7 +18,96 @@ import Language.Haskell.TH.Syntax
 import List.Sem
 import GHC.Arr (lessSafeIndex)
 import Debug.Trace (trace)
+import Visualize
+import Text.Printf (printf)
 
+import Test.QuickCheck
+import qualified Test.Tyche as Tyche
+import Term
+import Data.List (nub, intersect)
+import Test.QuickCheck
+import ElimTerm
+import Term
+import Types
+import Events
+import Control.Monad.State as ST
+import Control.Monad (when, foldM)
+
+import Test.Hspec
+import PartialOrder as PO
+import Basic.Sem
+import Basic.Stream
+import Control.Monad (replicateM)
+import Language.Haskell.TH.Syntax
+import List.Sem
+
+import Control.Monad.State
+import System.IO
+import Data.Either (isRight, isLeft)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+
+ctxUsed :: Term -> Ctx -> [String]
+ctxUsed term ctx =
+    let termVars = extractVarsFromTerm term in
+    let ctxVars = extractVarsFromCtx ctx in
+    termVars `intersect` ctxVars
+
+truncate :: Float -> Float
+truncate num = fromIntegral (floor (num * 100)) / 100
+
+calculateProportion :: [String] -> [String] -> Int
+calculateProportion termVars ctxVars
+    | null ctxVars = 100
+    | otherwise = round $ (fromIntegral (length termVars) / fromIntegral (length ctxVars)) * 100
+
+getConstructor :: Term -> String
+getConstructor EpsR = "EpsR"
+getConstructor (Var _ _) = "Var"
+getConstructor (IntR _) = "IntR"
+getConstructor (CatR _ _) = "CatR"
+getConstructor (CatL _ _ _ _) = "CatL"
+getConstructor (InL _ _) = "InL"
+getConstructor (InR _ _) = "InR"
+getConstructor (PlusCase _ _ _ _ _) = "PlusCase"
+getConstructor (Nil _) = "Nil"
+getConstructor (Cons _ _) = "Cons"
+getConstructor (StarCase _ _ _ _ _) = "StarCase"
+getConstructor (Let _ _ _ _) = "Let"
+getConstructor _ = error ""
+
+depth :: Term -> Int
+depth EpsR = 1
+depth (Var _ _) = 1
+depth (IntR _) = 1
+depth (CatR e1 e2) = 1 + max (depth e1) (depth e2)
+depth (CatL _ _ _ e) = 1 + depth e
+depth (InL e _) = 1 + depth e
+depth (InR e _) = 1 + depth e
+depth (PlusCase _ _ e1 _ e2) = 1 + max (depth e1) (depth e2)
+depth (Nil _) = 1
+depth (Cons e1 e2) = 1 + max (depth e1) (depth e2)
+depth (StarCase _ e1 _ _ e2) = 1 + max (depth e1) (depth e2)
+depth (Let _ _ e1 e2) = 1 + max (depth e1) (depth e2)
+depth _ = error ""
+
+extractVarsFromTerm :: Term -> [String]
+extractVarsFromTerm EpsR = []
+extractVarsFromTerm (Var x _) = [x]
+extractVarsFromTerm (IntR _) = []
+extractVarsFromTerm (CatR e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (CatL _ _ _ e) = extractVarsFromTerm e
+extractVarsFromTerm (InL e _) = extractVarsFromTerm e
+extractVarsFromTerm (InR e _) = extractVarsFromTerm e
+extractVarsFromTerm (PlusCase x _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2 ++ [x]
+extractVarsFromTerm (Nil _) = []
+extractVarsFromTerm (Cons e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm (StarCase x e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2 ++ [x]
+extractVarsFromTerm (Let _ _ e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
+extractVarsFromTerm _ = error ""
+
+extractVarsFromCtx :: Ctx -> [String]
+extractVarsFromCtx ctx = nub [x | Atom x _ <- ctx] ++ [x1 | Pair x1 _ x2 _ <- ctx] ++ [x2 | Pair x1 _ x2 _ <- ctx]
 
 data Binding = Atom String Ty | Pair String Ty String Ty deriving (Eq,Ord,Show,Lift)
 data LR = L | R | NA deriving (Eq, Ord, Show)
@@ -116,6 +205,12 @@ add el = do
   (n, ctx, ctx') <- get
   put (n, safeConcat ctx [el], ctx')
 
+remove :: Binding -> StateT (Int, Ctx, [String]) Gen ()
+remove binding = do
+  (n, ctx, ctx') <- get
+  let newCtx = filter (/= binding) ctx
+  put (n, newCtx, ctx')
+
 split :: StateT (Int, Ctx, [String]) Gen (Ctx, Ctx)
 split = do
   (_, ctx, _) <- get
@@ -166,12 +261,33 @@ enqueue x = do
   (n, ctx, ctx') <- get 
   put (n, ctx, ctx' ++ [x])
 
+push :: String -> StateT (Int, Ctx, [String]) Gen ()
+push x = do
+  (n, ctx, ctx') <- get 
+  put (n, ctx, ctx' ++ [x])
+
+pop :: StateT (Int, Ctx, [String]) Gen (Maybe String)
+pop = do
+  (n, ctx, ctx') <- get
+  case ctx' of
+    [] -> return Nothing
+    _  -> do
+      let (rest, lastElem) = (init ctx', last ctx') 
+      put (n, ctx, rest)
+      return (Just lastElem)
+
+remove' :: String -> StateT (Int, Ctx, [String]) Gen ()
+remove' name = do
+  (n, ctx, ctx') <- get
+  let newCtx' = filter (/= name) ctx'
+  put (n, ctx, newCtx')
+
 genTerm :: Maybe Ty -> Gen ((Term, Ty), (Int, Ctx, [String]))
 genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
   where
     useBound :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Maybe (Term, Ty))
     useBound mty n = do
-      (n, ctx, extCtx) <- get
+      (cnt, ctx, extCtx) <- get
       case extCtx of
         [] -> return Nothing
         (x:xs) -> do
@@ -181,7 +297,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
             (\(s, _) -> case mty of
                Nothing -> put (n, ctx, xs) >> return (Just (Var x s, s))
                Just t -> if t == s
-                         then put (n, ctx, xs) >> return (Just (Var x s, s))
+                         then put (cnt, ctx, xs) >> return (Just (Var x s, s))
                          else return Nothing)
             result
     cons :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
@@ -191,20 +307,15 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
               Nothing -> ST.lift genTy
       let initialAcc = Nil (TyStar ty)
       let loop acc curN = 
-            if curN <= 0
+            if curN <= 0 || depth acc > 5
             then return acc
             else do
-              choice <- ST.lift $ frequency [(3, return True), (1, return False)]              
+              choice <- ST.lift $ frequency [(3, return True), (1, return False)]
               if not choice
               then return acc -- Break early by returning the accumulated term.
               else do
-                (gamma, delta) <- split
-                replace gamma
-                choice' <- ST.lift $ frequency [(2, return R), (1, return L)]
-                (e, s) <- go (Just ty) choice' (curN - 1)
-                (_, gamma', _) <- get
-                replace (safeConcat gamma' delta)
-                loop (Cons e acc) (n - 1)
+                (e, s) <- go (Just ty) R (curN - 1)
+                loop (Cons e acc) (curN - 1) -- Use (curN - 1) to ensure progress.
       result <- loop initialAcc (n - 1)
       return (result, TyStar ty)
     nil :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
@@ -250,23 +361,23 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
 
       (gamma, delta) <- split
       replace gamma
-      (x, s) <- go s choiceS (n `div` 4)
+      (x, s) <- go s choiceS (n `div` 2)
       (_, gamma', _) <- get
       replace delta
-      (y, t) <- go t choiceT (n `div` 4)
+      (y, t) <- go t choiceT (n `div` 2)
       (_, delta', _) <- get
       replace (safeConcat gamma' delta')
       return (CatR x y, TyCat s t)
     plusR :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     plusR ty n = do
       s <- case ty of
-        Just (TyPlus s t) -> return (Just s)
-        Nothing -> return Nothing
+        Just (TyPlus s _) -> return s
+        Nothing -> ST.lift $ genTy
         _ -> error ""
 
       t <- case ty of
-        Just (TyPlus s t) -> return (Just t)
-        Nothing -> return Nothing
+        Just (TyPlus _ t) -> return t
+        Nothing -> ST.lift $ genTy
         _ -> error ""
 
       choiceS <- ST.lift $ frequency [(1, return L), (2, return R)]
@@ -275,44 +386,21 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       choice <- ST.lift $ oneof [return True, return False]
       case choice of
         True -> do
-          t <- case ty of
-              Just (TyPlus s t) -> return t
-              Nothing -> ST.lift $ genTy
-          (e1, s) <- go s choiceS (n `div` 4)
+          (e1, s) <- go (Just s) choiceS (n `div` 2)
           return (InL e1 (TyPlus s t), TyPlus s t)
         False -> do
-          s <- case ty of
-              Just (TyPlus s t) -> return s
-              Nothing -> ST.lift $ genTy
-          (e2, t) <- go t choiceT (n `div` 4)
+          (e2, t) <- go (Just t) choiceT (n `div` 2)
           return (InR e2 (TyPlus s t), TyPlus s t)
     var :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
-    var (Just r) _ = do
+    var ty _ = do
       x <- fresh
-      add (Atom x r)
-      return (Var x r, r)
-    var Nothing n = do
-      s <- ST.lift $ genTy
-      x <- fresh
+      s <- case ty of
+        Nothing -> ST.lift $ genTy
+        (Just s) -> return s
       add (Atom x s)
       return (Var x s, s)
     catL :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
-    catL (Just r) n = do
-        x <- fresh
-        y <- fresh
-        z <- fresh
-
-        s <- ST.lift $ genTy
-        t <- ST.lift $ genTy
-
-        splitAndInsert [Pair x s y t]
-        lr <- ST.lift $ leftOrRight
-        (e, _) <- go (Just r) lr (n `div` 2)
-
-        replaceElement [Atom z (TyCat s t)] x
-        enqueue z
-        return (CatL x y z e, r)
-    catL Nothing n = do
+    catL ty n = do
       s <- ST.lift $ genTy
       t <- ST.lift $ genTy
 
@@ -320,11 +408,14 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       y <- fresh
       z <- fresh
 
+      choice <- case ty of
+        Nothing -> return NA
+        Just _ -> ST.lift $ frequency [(2, return R), (1, return L)]
+
       splitAndInsert [Pair x s y t]
-      -- (e, r) <- go Nothing NA (n `div` 4)
+      (e, r) <- go ty choice (n `div` 2)
       replaceElement [Atom z (TyCat s t)] x
-      enqueue z
-      (e, r) <- go Nothing NA (n `div` 4) -- Is this OK?
+
       return (CatL x y z e, r)
     let' :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     let' r n = do
@@ -334,37 +425,24 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         replace temp
         (delta, gamma1) <- split
 
+        choice <- case r of
+          Nothing -> return NA
+          Just _ -> ST.lift $ frequency [(2, return R), (1, return L)]
+
         replace delta
-        (e, s) <- go Nothing R (n `div` 2)
+        (e, s) <- go Nothing choice (n `div` 2)
         (_, delta', _) <- get
 
         replace (safeConcat (safeConcat gamma0 [Atom x s]) gamma1)
         enqueue x
-        (e', r) <- go r R (n `div` 2)
+        lr <- ST.lift leftOrRight
+        (e', r) <- go r lr (n `div` 2)
+        remove' x
 
         replaceElement delta' x
         return (Let x s e e', r)
     plus :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
-    plus (Just r) n = do
-        x <- fresh
-        y <- fresh
-        z <- fresh
-
-        s <- ST.lift $ genTy
-        t <- ST.lift $ genTy
-
-        splitAndInsert [Atom x s]
-        lr <- ST.lift $ leftOrRight
-        (e1, _) <- go (Just r) lr (n `div` 2)
-      
-        replaceElement [Atom y t] x
-      
-        lr' <- ST.lift $ leftOrRight
-        (e2, _) <- go (Just r) lr' (n `div` 2)
-      
-        replaceElement [Atom z (TyPlus s t)] y
-        return (PlusCase z x e1 y e2, t)
-    plus Nothing n = do
+    plus ty n = do
       s <- ST.lift $ genTy
       t <- ST.lift $ genTy
 
@@ -373,11 +451,15 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
 
       splitAndInsert [Atom x s]
       
-      (e1, r1) <- go Nothing NA (n `div` 4)
+      choice <- case ty of
+        Nothing -> return NA
+        Just _ -> ST.lift $ frequency [(2, return R), (1, return L)]
+
+      (e1, r1) <- go ty choice (n `div` 2)
 
       replaceElement [Atom y t] x
       lr <- ST.lift leftOrRight
-      (e2, _) <- go (Just r1) lr (n `div` 4)
+      (e2, _) <- go (Just r1) lr (n `div` 2)
 
       z <- fresh
       replaceElement [Atom z (TyPlus s t)] y

@@ -36,68 +36,6 @@ import Data.Either (isRight, isLeft)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
-getConstructor :: Term -> String
-getConstructor EpsR = "EpsR"
-getConstructor (Var _ _) = "Var"
-getConstructor (IntR _) = "IntR"
-getConstructor (CatR _ _) = "CatR"
-getConstructor (CatL _ _ _ _) = "CatL"
-getConstructor (InL _ _) = "InL"
-getConstructor (InR _ _) = "InR"
-getConstructor (PlusCase _ _ _ _ _) = "PlusCase"
-getConstructor (Nil _) = "Nil"
-getConstructor (Cons _ _) = "Cons"
-getConstructor (StarCase _ _ _ _ _) = "StarCase"
-getConstructor (Let _ _ _ _) = "Let"
-getConstructor _ = error ""
-
-depth :: Term -> Int
-depth EpsR = 1
-depth (Var _ _) = 1
-depth (IntR _) = 1
-depth (CatR e1 e2) = 1 + max (depth e1) (depth e2)
-depth (CatL _ _ _ e) = 1 + depth e
-depth (InL e _) = 1 + depth e
-depth (InR e _) = 1 + depth e
-depth (PlusCase _ _ e1 _ e2) = 1 + max (depth e1) (depth e2)
-depth (Nil _) = 1
-depth (Cons e1 e2) = 1 + max (depth e1) (depth e2)
-depth (StarCase _ e1 _ _ e2) = 1 + max (depth e1) (depth e2)
-depth (Let _ _ e1 e2) = 1 + max (depth e1) (depth e2)
-depth _ = error ""
-
-extractVarsFromTerm :: Term -> [String]
-extractVarsFromTerm EpsR = []
-extractVarsFromTerm (Var x _) = [x]
-extractVarsFromTerm (IntR _) = []
-extractVarsFromTerm (CatR e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm (CatL _ _ _ e) = extractVarsFromTerm e
-extractVarsFromTerm (InL e _) = extractVarsFromTerm e
-extractVarsFromTerm (InR e _) = extractVarsFromTerm e
-extractVarsFromTerm (PlusCase _ _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm (Nil _) = []
-extractVarsFromTerm (Cons e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm (StarCase _ e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm (Let _ _ e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm _ = error ""
-
-extractVarsFromCtx :: Ctx -> [String]
-extractVarsFromCtx ctx = nub [x | Atom x _ <- ctx] ++ [x1 | Pair x1 _ x2 _ <- ctx] ++ [x2 | Pair x1 _ x2 _ <- ctx]
-
-ctxUsed :: Term -> Ctx -> [String]
-ctxUsed term ctx =
-    let termVars = extractVarsFromTerm term in
-    let ctxVars = extractVarsFromCtx ctx in
-    termVars `intersect` ctxVars
-
-truncate :: Float -> Float
-truncate num = fromIntegral (floor (num * 100)) / 100
-
-calculateProportion :: [String] -> [String] -> Int
-calculateProportion termVars ctxVars
-    | null ctxVars = 100
-    | otherwise = round $ (fromIntegral (length termVars) / fromIntegral (length ctxVars)) * 100
-
 prop_categorizeConstructor :: Property
 prop_categorizeConstructor =
     Tyche.visualize "prop_categorizeConstructor" $
