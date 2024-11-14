@@ -8,7 +8,7 @@
 module NormalForm (normalize) where
 
 import Types
-import PHoas
+import Hoas
 import Data.Void
 import Control.Monad (join, liftM2)
 
