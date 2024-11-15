@@ -18,7 +18,6 @@ import Language.Haskell.TH.Syntax
 import List.Sem
 import GHC.Arr (lessSafeIndex)
 import Debug.Trace (trace)
-import Visualize
 import Text.Printf (printf)
 
 import Test.QuickCheck
@@ -61,6 +60,13 @@ calculateProportion termVars ctxVars
     | null ctxVars = 100
     | otherwise = round $ (fromIntegral (length termVars) / fromIntegral (length ctxVars)) * 100
 
+calculateUsedBoundIntersection :: Term -> Int
+calculateUsedBoundIntersection tm = 
+  let used = extractVarsFromTerm tm in
+  let bound = extractBoundVarsFromTerm tm in
+  round $ fromIntegral (length (used `intersect` bound)) / fromIntegral (length bound) 
+
+
 getConstructor :: Term -> String
 getConstructor EpsR = "EpsR"
 getConstructor (Var _ _) = "Var"
@@ -99,12 +105,27 @@ extractVarsFromTerm (CatR e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFr
 extractVarsFromTerm (CatL _ _ _ e) = extractVarsFromTerm e
 extractVarsFromTerm (InL e _) = extractVarsFromTerm e
 extractVarsFromTerm (InR e _) = extractVarsFromTerm e
-extractVarsFromTerm (PlusCase x _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2 ++ [x]
+extractVarsFromTerm (PlusCase _ _ e1 _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
 extractVarsFromTerm (Nil _) = []
 extractVarsFromTerm (Cons e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
-extractVarsFromTerm (StarCase x e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2 ++ [x]
+extractVarsFromTerm (StarCase _ e1 _ _ e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
 extractVarsFromTerm (Let _ _ e1 e2) = nub $ extractVarsFromTerm e1 ++ extractVarsFromTerm e2
 extractVarsFromTerm _ = error ""
+
+extractBoundVarsFromTerm :: Term -> [String]
+extractBoundVarsFromTerm EpsR = []
+extractBoundVarsFromTerm (Var _ _) = []
+extractBoundVarsFromTerm (IntR _) = []
+extractBoundVarsFromTerm (CatR e1 e2) = extractBoundVarsFromTerm e1 ++ extractBoundVarsFromTerm e2
+extractBoundVarsFromTerm (CatL _ _ z e) = z : extractBoundVarsFromTerm e
+extractBoundVarsFromTerm (InL e _) = extractBoundVarsFromTerm e
+extractBoundVarsFromTerm (InR e _) = extractBoundVarsFromTerm e
+extractBoundVarsFromTerm (PlusCase _ _ e1 _ e2) = extractBoundVarsFromTerm e1 ++ extractBoundVarsFromTerm e2
+extractBoundVarsFromTerm (Nil _) = []
+extractBoundVarsFromTerm (Cons e1 e2) = extractBoundVarsFromTerm e1 ++ extractBoundVarsFromTerm e2
+extractBoundVarsFromTerm (StarCase _ e1 _ _ e2) = extractBoundVarsFromTerm e1 ++ extractBoundVarsFromTerm e2
+extractBoundVarsFromTerm (Let x _ e1 e2) = x : (extractBoundVarsFromTerm e1 ++ extractBoundVarsFromTerm e2)
+extractBoundVarsFromTerm _ = []
 
 extractVarsFromCtx :: Ctx -> [String]
 extractVarsFromCtx ctx = nub [x | Atom x _ <- ctx] ++ [x1 | Pair x1 _ x2 _ <- ctx] ++ [x2 | Pair x1 _ x2 _ <- ctx]
@@ -112,7 +133,7 @@ extractVarsFromCtx ctx = nub [x | Atom x _ <- ctx] ++ [x1 | Pair x1 _ x2 _ <- ct
 data Binding = Atom String Ty | Pair String Ty String Ty deriving (Eq,Ord,Show,Lift)
 data LR = L | R | NA deriving (Eq, Ord, Show)
 
-data PossibleTerm's = HCatR | HPlusR | HCatL | HPlusL | HLet | HVar | HInt | HEps | HNil | HCons | HStarL
+data PossibleTerm = HCatR | HPlusR | HCatL | HPlusL | HLet | HVar | HInt | HEps | HNil | HCons | HStarL
 
 type Ctx = [Binding]
 
@@ -458,16 +479,18 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
     lCases r n = do
       (_, _, extCtx) <- get
       choice <- ST.lift $ frequency
-        [ (4 * length extCtx + 1, return HVar),
-          (1, return HCatL),
-          (1, return HLet),
-          (1, return HPlusL)
+        [ ((100 - n) * length extCtx + 1, return HVar),
+          (n, return HCatL),
+          (n, return HLet),
+          (n, return HPlusL)
+          -- (n, return HStarL)
         ]
       case choice of 
         HVar -> var (Just r) n
         HCatL -> catL (Just r) n
         HLet -> let' (Just r) n
         HPlusL -> plus (Just r) n
+        HStarL -> starCase (Just r) n
         _ -> error ""
     go :: Maybe Ty -> LR -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     go (Just TyEps) _ _ = return (EpsR, TyEps)
@@ -502,17 +525,17 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
     go Nothing _ n = do
       (_, _, extCtx) <- get
       choice <- ST.lift $ frequency
-        [ (5, return HCatR),
-          (5, return HCatL),
-          (7, return HPlusR),
-          -- (5, return HPlusL),
-          (2, return HNil),
-          (5, return HCons),
-          -- (5, return HStarL),
-          (5, return HLet),
-          (7 * length extCtx + 1, return HVar),
-          (2, return HInt),
-          (2, return HEps)
+        [ (n, return HCatR),
+          (n, return HCatL),
+          (n, return HPlusR),
+          (n, return HPlusL),
+          -- ((100 - n), return HNil),
+          -- (n, return HCons),
+          -- (n, return HStarL),
+          (n, return HLet),
+          ((100 - n) + 200 * length extCtx + 1, return HVar),
+          ((100 - n), return HInt),
+          ((100 - n), return HEps)
         ]
       case choice of
         HCatR -> catR Nothing (n - 1)

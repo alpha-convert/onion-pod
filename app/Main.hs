@@ -61,14 +61,15 @@ prop_usedVars =
             let termVars = ctxUsed term ctx
                 ctxVars = extractVarsFromCtx ctx
                 proportion = calculateProportion termVars ctxVars
+                proportion' = calculateUsedBoundIntersection term
             in label ("used_vars:" ++ show (proportion)) $
                 label ("depth:" ++ show (depth term)) $
                 label ("constructor:" ++ getConstructor term) $
                 label ("ctx_size: " ++ show (length ctx)) $
+                label ("used_of_bound:" ++ show (proportion')) $
                 case check ctx term ty of
                     Right _  -> True
                     Left err -> False
-                    
 return []
 
 main :: IO Bool
