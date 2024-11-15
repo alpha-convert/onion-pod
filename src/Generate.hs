@@ -224,26 +224,6 @@ splitAndInsert ctx = do
   (ctx0, ctx1) <- split
   replace $ safeConcat (safeConcat ctx0 ctx) ctx1
 
--- When we've hit 0, generate some concrete type, with no holes.
-leaf :: StateT (Int, Ctx, [String]) Gen (Term, Ty)
-leaf = do
-  (_, ctx, ctx') <- get
-  -- Get the current list of bindings.
-  let ctxList = extractBindings ctx
-  -- If the context is empty, we can create a new binding in it, or we can return an
-  -- integer or epsilon type.
-  s <- ST.lift genTy
-  choice <- ST.lift $ oneof [return TyInt, return TyEps, return s]
-  x <- fresh
-  case choice of 
-    TyInt -> do
-      int <- IntR <$> ST.lift arbitrary
-      return (int, TyInt)
-    TyEps -> return (EpsR, TyEps)
-    _ -> do
-      add (Atom x s)
-      return (Var x s, s)
-
 leftOrRight :: Gen LR
 leftOrRight = do elements [L, R]
 
@@ -261,11 +241,6 @@ dequeue = do
     (x:xs) -> do
       put (n, ctx, xs)               
       return (Just x)               
-
-enqueue :: String -> StateT (Int, Ctx, [String]) Gen ()
-enqueue x = do
-  (n, ctx, ctx') <- get 
-  put (n, ctx, ctx' ++ [x])
 
 push :: String -> StateT (Int, Ctx, [String]) Gen ()
 push x = do
@@ -342,8 +317,15 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       s <- ST.lift $ genTy
 
       splitAndInsert [Pair x s xs (TyStar s)]
+
+      push xs
+      push x
+
       lr' <- ST.lift $ leftOrRight
       (es, _) <- go (Just ty) lr' (n `div` 2)
+
+      remove' x
+      remove' xs
 
       replaceElement [Atom z (TyStar s)] x
 
@@ -360,8 +342,8 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         Nothing -> return Nothing
         _ -> error ""
 
-      choiceS <- ST.lift $ frequency [(1, return L), (2, return R)]
-      choiceT <- ST.lift $ frequency [(1, return L), (2, return R)]
+      choiceS <- ST.lift $ leftOrRight
+      choiceT <- ST.lift $ leftOrRight
 
       (gamma, delta) <- split
       replace gamma
@@ -384,8 +366,8 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         Nothing -> ST.lift $ genTy
         _ -> error ""
 
-      choiceS <- ST.lift $ frequency [(1, return L), (2, return R)]
-      choiceT <- ST.lift $ frequency [(1, return L), (2, return R)]
+      choiceS <- ST.lift $ leftOrRight
+      choiceT <- ST.lift $ leftOrRight
 
       choice <- ST.lift $ oneof [return True, return False]
       case choice of
@@ -418,8 +400,14 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
 
       choice <- ST.lift $ choice ty
       splitAndInsert [Pair x s y t]
+      push y
+      push x
+
       (e, r) <- go ty choice (n `div` 2)
       replaceElement [Atom z (TyCat s t)] x
+
+      remove' y
+      remove' x
 
       return (CatL x y z e, r)
     let' :: Maybe Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
@@ -436,7 +424,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         (_, delta', _) <- get
 
         replace (safeConcat (safeConcat gamma0 [Atom x s]) gamma1)
-        enqueue x
+        push x
         lr <- ST.lift leftOrRight
         (e', r') <- go r lr (n `div` 2)
         remove' x
@@ -449,17 +437,19 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       t <- ST.lift $ genTy
 
       x <- fresh
-      y <- fresh
 
-      splitAndInsert [Atom x s]
-      
+      splitAndInsert [Atom x s]      
       choice <- ST.lift $ choice ty
-      
+      push x
       (e1, r1) <- go ty choice (n `div` 2)
+      remove' x
 
+      y <- fresh
       replaceElement [Atom y t] x
       lr <- ST.lift leftOrRight
+      push y
       (e2, _) <- go (Just r1) lr (n `div` 2)
+      remove' y
 
       z <- fresh
       replaceElement [Atom z (TyPlus s t)] y
@@ -472,7 +462,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
       l <- let' (Just r) n
       p <- plus (Just r) n
       ST.lift $ frequency
-        [ (15 * length extCtx + 1, return v),
+        [ (4 * length extCtx + 1, return v),
           (1, return c),
           (1, return l),
           (1, return p)
@@ -498,7 +488,15 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         HCons -> cons (Just s) (n - 1)
         HNil -> nil (Just (TyStar s)) (n - 1)
         _ -> error ""
-    go Nothing _ 0 = do leaf
+    go Nothing _ 0 = do
+      choice <- ST.lift $ oneof [return HInt, return HEps, return HVar] --, return s]
+      case choice of 
+        HInt -> do
+          int <- IntR <$> ST.lift arbitrary
+          return (int, TyInt)
+        HEps -> return (EpsR, TyEps)
+        HVar -> var Nothing 0
+        _ -> error ""
     go Nothing _ n = do
       (_, _, extCtx) <- get
       choice <- ST.lift $ frequency
@@ -510,7 +508,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
           (5, return HCons),
           (5, return HStarL),
           (5, return HLet),
-          (15 * length extCtx + 5, return HVar),
+          (7 * length extCtx + 1, return HVar),
           (2, return HInt),
           (2, return HEps)
         ]
