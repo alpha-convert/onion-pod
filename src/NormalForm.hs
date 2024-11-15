@@ -1,4 +1,3 @@
-
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
@@ -6,13 +5,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module NormalForm where
+module NormalForm (normalize) where
 
 import Types
-import PHoas
+import Hoas
 import Data.Void
 import Control.Monad (join, liftM2)
-{-
+
 class Base a where
     embBase :: a -> Term Rf a
 instance Base Int where
@@ -119,11 +118,14 @@ eval (CatR e1 e2) = Leaf (eval e1, eval e2)
 eval (CatL e k) = runCover @a $ do
     (sa,sb) <- eval e
     return (eval (k (quote sa) (quote sb)))
+eval (Inl e) = Leaf (Left (eval e))
+eval (Inr e) = Leaf (Right (eval e))
+eval (PlusCase e k k') = runCover @a $ do
     u <- eval e
+    return $ case u of
         Left sa -> eval (k (quote sa))
         Right sb -> eval (k' (quote sb))
 eval (Let e k) = eval (k e)
 
 normalize :: Rf a => Term Rf a -> Term Rf a
 normalize = quote . eval
--}

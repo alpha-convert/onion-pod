@@ -8,7 +8,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module PHoas where
+module Hoas where
 import Data.Void
 
 import qualified Term as Raw
