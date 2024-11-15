@@ -457,16 +457,18 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
     lCases :: Ty -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     lCases r n = do
       (_, _, extCtx) <- get
-      v <- var (Just r) n
-      c <- catL (Just r) n
-      l <- let' (Just r) n
-      p <- plus (Just r) n
-      ST.lift $ frequency
-        [ (4 * length extCtx + 1, return v),
-          (1, return c),
-          (1, return l),
-          (1, return p)
+      choice <- ST.lift $ frequency
+        [ (4 * length extCtx + 1, return HVar),
+          (1, return HCatL),
+          (1, return HLet),
+          (1, return HPlusL)
         ]
+      case choice of 
+        HVar -> var (Just r) n
+        HCatL -> catL (Just r) n
+        HLet -> let' (Just r) n
+        HPlusL -> plus (Just r) n
+        _ -> error ""
     go :: Maybe Ty -> LR -> Int -> StateT (Int, Ctx, [String]) Gen (Term, Ty)
     go (Just TyEps) _ _ = return (EpsR, TyEps)
     go (Just TyInt) _ _ = do
@@ -489,7 +491,7 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         HNil -> nil (Just (TyStar s)) (n - 1)
         _ -> error ""
     go Nothing _ 0 = do
-      choice <- ST.lift $ oneof [return HInt, return HEps, return HVar] --, return s]
+      choice <- ST.lift $ oneof [return HInt, return HEps, return HVar]
       case choice of 
         HInt -> do
           int <- IntR <$> ST.lift arbitrary
@@ -503,10 +505,10 @@ genTerm maybeTy = sized (\n -> runStateT (go maybeTy R n) (0, [], []))
         [ (5, return HCatR),
           (5, return HCatL),
           (7, return HPlusR),
-          (5, return HPlusL),
+          -- (5, return HPlusL),
           (2, return HNil),
           (5, return HCons),
-          (5, return HStarL),
+          -- (5, return HStarL),
           (5, return HLet),
           (7 * length extCtx + 1, return HVar),
           (2, return HInt),
