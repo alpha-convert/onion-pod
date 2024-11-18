@@ -58,11 +58,8 @@ prop_usedVars :: Property
 prop_usedVars =
     Tyche.visualize "prop_all" $
         forAll (genTerm Nothing) $ \((term, ty), (_, ctx, _)) ->
-            let termVars = ctxUsed term ctx
-                ctxVars = extractVarsFromCtx ctx
-                proportion = calculateProportion termVars ctxVars
-                proportion' = calculateUsedBoundIntersection term
-            in label ("used_vars:" ++ show (proportion)) $
+            let proportion' = calculateUsedBoundIntersection term
+            in
                 label ("depth:" ++ show (depth term)) $
                 label ("constructor:" ++ getConstructor term) $
                 label ("ctx_size: " ++ show (length ctx)) $
