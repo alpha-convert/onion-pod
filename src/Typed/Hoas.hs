@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Hoas where
+module Typed.Hoas where
 import Data.Void
 
 import qualified Term as Raw
@@ -49,16 +49,17 @@ unTypeRep (StreamTypes.TyPlus s t) =
     PackTy (TSum u v)
 unTypeRep (StreamTypes.TyStar _) = error "HOAS branch does not yet support stars"
 
-data Term c a where
-    EpsR :: Term c Void
-    Var :: c a => String -> Term c a
-    IntR :: Int -> Term c Int
-    CatR :: (c a, c b) => Term c a -> Term c b -> Term c (a,b)
-    CatL :: (c a, c b, c d) => Term c (a,b) -> (Term c a -> Term c b -> Term c d) -> Term c d
-    Inl :: (c a, c b) => Term c a -> Term c (Either a b)
-    Inr :: (c a, c b) => Term c b -> Term c (Either a b)
-    PlusCase :: (c a, c b, c d) => Term c (Either a b) -> (Term c a -> Term c d) -> (Term c b -> Term c d) -> Term c d
-    Let :: (c a, c b) => Term c a -> (Term c a -> Term c b) -> Term c b
+data Term v c a where
+    EpsR :: Term v c Void
+    -- FreeVar :: c a => String -> Term v c a
+    BoundVar :: c a => v a -> Term v c a
+    IntR :: Int -> Term v c Int
+    CatR :: (c a, c b) => Term v c a -> Term v c b -> Term v c (a,b)
+    CatL :: (c a, c b, c d) => Term v c (a,b) -> (v a -> v b -> Term v c d) -> Term v c d
+    Inl :: (c a, c b) => Term v c a -> Term v c (Either a b)
+    Inr :: (c a, c b) => Term v c b -> Term v c (Either a b)
+    PlusCase :: (c a, c b, c d) => Term v c (Either a b) -> (v a -> Term v c d) -> (v b -> Term v c d) -> Term v c d
+    Let :: (c a, c b) => Term v c a -> (v a -> Term v c b) -> Term v c b
 
 
 instance StreamTyped Void where
@@ -74,10 +75,11 @@ instance (StreamTyped a, StreamTyped b) => StreamTyped (Either a b) where
     typeRep = TSum typeRep typeRep
 
 
-reConstrain :: (forall a. c1 a :- c2 a) -> Term c1 a -> Term c2 a
+reConstrain :: (forall a. c1 a :- c2 a) -> Term v c1 a -> Term v c2 a
 reConstrain f e = undefined
 
-toTerm :: forall a. StreamTyped a => Term StreamTyped a -> Raw.Term
+{-
+toTerm :: forall a v. StreamTyped a => Term v StreamTyped a -> Raw.Term
 toTerm e = evalState (go e (typeRep @a)) 0
     where
         fresh :: forall m. MonadState Int m => m String
@@ -86,20 +88,21 @@ toTerm e = evalState (go e (typeRep @a)) 0
             put (n + 1)
             return $ "_x" ++ show n
 
-        go :: forall a m . (MonadState Int m) => Term StreamTyped a -> TypeRep StreamTyped a -> m Raw.Term
+        go :: forall a m v. (MonadState Int m) => Term v StreamTyped a -> TypeRep StreamTyped a -> m Raw.Term
         go EpsR _ = return Raw.EpsR
-        go (Var x) tr = return (Raw.Var x (streamTypeRep tr))
+        go (FreeVar x) tr = return (Raw.Var x (streamTypeRep tr))
+        go (BoundVar x) tr = return (Raw.Var x (streamTypeRep tr))
         go (IntR n) _ = return (Raw.IntR n)
         go (CatR e1 e2) (TPair s t) = do
             e1' <- go e1 s
             e2' <- go e2 t
             return (Raw.CatR e1' e2')
-        go (CatL (e :: Term StreamTyped u) k) tr = do
+        go (CatL (e :: Term v StreamTyped u) k) tr = do
             x <- fresh
             y <- fresh
             z <- fresh
             e' <- go e (typeRep @u)
-            ek <- go (k (Var x) (Var y)) tr
+            ek <- go (k (FreeVar x) (FreeVar y)) tr
             return (Raw.Let z (streamTypeRep (typeRep @u)) e' (Raw.CatL x y z ek))
         go (Inl e) (TSum s t) = do
             e' <- go e s
@@ -107,41 +110,41 @@ toTerm e = evalState (go e (typeRep @a)) 0
         go (Inr e) (TSum s t) = do
             e' <- go e t
             return (Raw.InR e' (streamTypeRep s))
-        go (PlusCase (e :: Term StreamTyped u) k k') tr = do
+        go (PlusCase (e :: Term v StreamTyped u) k k') tr = do
             x <- fresh
             y <- fresh
             z <- fresh
             e' <- go e (typeRep @u)
-            ek <- go (k (Var x)) tr
-            ek' <- go (k' (Var y)) tr
+            ek <- go (k (FreeVar x)) tr
+            ek' <- go (k' (FreeVar y)) tr
             return (Raw.Let z (streamTypeRep (typeRep @u)) e' (Raw.PlusCase z x ek y ek'))
-        go (Let (e :: Term StreamTyped u) k) tr = do
+        go (Let (e :: Term v StreamTyped u) k) tr = do
             let tr' = typeRep @u
             x <- fresh
             e' <- go e tr'
-            ek <- go (k (Var x)) tr
+            ek <- go (k (FreeVar x)) tr
             return (Raw.Let x (streamTypeRep tr') e' ek)
 
 data TypedTerm where
-    Pack :: forall a. StreamTyped a => TypeRep StreamTyped a -> Term StreamTyped a -> TypedTerm
+    Pack :: forall a. StreamTyped a => TypeRep StreamTyped a -> (forall v. Term v StreamTyped a) -> TypedTerm
 
 fromTerm :: Raw.Term -> M.Map String StreamTypes.Ty -> StreamTypes.Ty -> TypedTerm
 fromTerm e m t = 
     unTypeRep t & \(PackTy tr) ->
-        go e (M.mapWithKey varUp m) tr & \(e :: Term StreamTyped a) ->
+        go e (M.mapWithKey varUp m) tr & \(e :: Term v StreamTyped a) ->
             Pack tr e
     where
         -- The "typed term" that is just this variable
         varUp :: String -> StreamTypes.Ty -> TypedTerm
         varUp x t =
             unTypeRep t & \(PackTy tr) ->
-                Pack tr (Var x)
-        go :: StreamTyped a => Raw.Term -> M.Map String TypedTerm -> TypeRep StreamTyped a -> Term StreamTyped a
+                Pack tr (FreeVar x)
+        go :: StreamTyped a => Raw.Term -> M.Map String TypedTerm -> TypeRep StreamTyped a -> Term v StreamTyped a
         go Raw.EpsR _ TVoid = EpsR
         go Raw.EpsR _ _ = error ""
         go (Raw.IntR n) _ TInt = IntR n
         go (Raw.IntR {}) _ _ = error ""
-        go (Raw.Var x _) _ (_ :: TypeRep StreamTyped a) = Var @StreamTyped @a x
+        go (Raw.Var x _) _ (_ :: TypeRep StreamTyped a) = FreeVar @StreamTyped @a x
         go (Raw.CatR e1 e2) m (TPair s t) = CatR (go e1 m s) (go e2 m t)
         go (Raw.CatR e1 e2) m _ = error ""
         go (Raw.CatL x y z e) m t' =
@@ -166,3 +169,4 @@ fromTerm e m t =
 -- fromTerm (Raw.IntR n) = _
 -- fromTerm (CatL x y z e) = _
 -- fromTerm (CatR e e') = _
+-}
